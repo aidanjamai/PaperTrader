@@ -1,0 +1,30 @@
+.App {
+  min-height: 100vh;
+}
+
+.container {
+  padding-top: 20px;
+  padding-bottom: 40px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .container {
+    padding: 20px 15px;
+  }
+  
+  .card {
+    margin: 0 15px;
+    padding: 24px;
+  }
+  
+  .navbar-content {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .auth-links {
+    justify-content: center;
+  }
+}
+
