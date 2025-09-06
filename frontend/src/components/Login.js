@@ -23,18 +23,18 @@ function Login({ onLogin }) {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('/api/account/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify(formData)
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
+        localStorage.setItem('token', data.token);
         onLogin(data.user);
         navigate('/dashboard');
       } else {

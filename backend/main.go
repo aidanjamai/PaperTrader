@@ -7,23 +7,32 @@ import (
 	"os"
 
 	"papertrader/internal/api/account"
+	"papertrader/internal/api/auth"
 	"papertrader/internal/api/middleware"
 	"papertrader/internal/data"
 
 	"github.com/gorilla/mux"
-	"github.com/gorilla/sessions"
 	_ "modernc.org/sqlite"
 )
 
 func main() {
-
-	router, accountHandler := initialize()
-	// API routes
-	apiRouter := router.PathPrefix("/api").Subrouter()
-	apiRouter.Handle("/account", account.Routes(accountHandler))
+	router, accountHandler, db := initialize()
+	defer db.Close()
 
 	// CORS middleware
 	router.Use(middleware.CORS())
+
+	// API routes
+	apiRouter := router.PathPrefix("/api").Subrouter()
+	apiRouter.PathPrefix("/account").Handler(account.Routes(accountHandler))
+
+	// Debug: Print all routes
+	// router.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+	// 	template, _ := route.GetPathTemplate()
+	// 	methods, _ := route.GetMethods()
+	// 	log.Printf("Route: %s, Methods: %v", template, methods)
+	// 	return nil
+	// })
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
@@ -35,13 +44,13 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initialize() (router *mux.Router, accountHandler *account.AccountHandler) {
+func initialize() (*mux.Router, *account.AccountHandler, *sql.DB) {
 	// Initialize database
 	db, err := sql.Open("sqlite", "./papertrader.db")
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
-	defer db.Close()
+	
 
 	// Test database connection
 	if err := db.Ping(); err != nil {
@@ -54,15 +63,17 @@ func initialize() (router *mux.Router, accountHandler *account.AccountHandler) {
 		log.Fatal("Failed to initialize user store:", err)
 	}
 
-	// Initialize session store
-	sessionStore := sessions.NewCookieStore([]byte("your-secret-key-here"))
+	// Initialize JWT service
+	jwtService := auth.NewJWTService("your-secret-key-here")
 
-	// Initialize handlers
-	accountHandler = account.NewAccountHandler(userStore, sessionStore)
+	// Initialize auth service
+	authService := auth.NewAuthService(userStore, jwtService)
+
+	// Initialize account handler
+	accountHandler := account.NewAccountHandler(userStore, authService)
 
 	// Setup router
-	router = mux.NewRouter()
+	router := mux.NewRouter()
 
-	// Return router and account handler
-	return router, accountHandler
+	return router, accountHandler, db
 }

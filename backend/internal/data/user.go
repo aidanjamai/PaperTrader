@@ -3,18 +3,19 @@ package data
 import (
 	"database/sql"
 	"errors"
-	"time"
+	"fmt"
 	"strings"
+	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
-	Password  string    `json:"-"` 
+	Password  string    `json:"-"`
 	CreatedAt time.Time `json:"created_at"`
 	Balance   float64   `json:"balance"`
 }
@@ -36,7 +37,7 @@ func (us *UserStore) Init() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		balance REAL DEFAULT 10000.00
 	);`
-	
+
 	_, err := us.db.Exec(query)
 	return err
 }
@@ -44,10 +45,11 @@ func (us *UserStore) Init() error {
 func (us *UserStore) CreateUser(email, password string) (*User, error) {
 	// Generate random UUID
 	userID := uuid.New().String()
-	
+
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		fmt.Println("Error hashing password:", err)
 		return nil, err
 	}
 	email = normalizeEmail(email)
@@ -56,56 +58,59 @@ func (us *UserStore) CreateUser(email, password string) (*User, error) {
 	INSERT INTO users (id, email, password, created_at, balance)
 	VALUES (?, ?, ?, CURRENT_TIMESTAMP, 10000.00)`
 
-	var user User
-	err = us.db.QueryRow(query, userID, email, string(hashedPassword)).Scan(&user.ID, &user.Email, &user.Password, &user.CreatedAt, &user.Balance)
+	// Use Exec for INSERT, not QueryRow
+	_, err = us.db.Exec(query, userID, email, string(hashedPassword))
 	if err != nil {
+		fmt.Println("Error creating user:", err)
 		return nil, err
 	}
 
-	return &User{
-		ID:        user.ID,
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt,
-		Balance:   user.Balance, // Starting balance
-	}, nil
+	// Now fetch the created user
+	user, err := us.GetUserByID(userID)
+	if err != nil {
+		fmt.Println("Error fetching created user:", err)
+		return nil, err
+	}
+
+	return user, nil
 }
 
 func (us *UserStore) GetUserByEmail(email string) (*User, error) {
 	query := `SELECT id, email, password, created_at, balance FROM users WHERE email = ?`
-	
+
 	var user User
 	email = normalizeEmail(email)
 	err := us.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Email, &user.Password,
 		&user.CreatedAt, &user.Balance,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("user not found")
 		}
 		return nil, err
 	}
-	
+
 	return &user, nil
 }
 
 func (us *UserStore) GetUserByID(id string) (*User, error) {
 	query := `SELECT id, email, password, created_at, balance FROM users WHERE id = ?`
-	
+
 	var user User
 	err := us.db.QueryRow(query, id).Scan(
 		&user.ID, &user.Email, &user.Password,
 		&user.CreatedAt, &user.Balance,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("user not found")
 		}
 		return nil, err
 	}
-	
+
 	return &user, nil
 }
 
@@ -128,5 +133,5 @@ func (us *UserStore) GetBalance(userID string) (float64, error) {
 }
 
 func normalizeEmail(s string) string {
-    return strings.ToLower(strings.TrimSpace(s))
+	return strings.ToLower(strings.TrimSpace(s))
 }

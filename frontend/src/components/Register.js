@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { apiRequest } from '../utils/api';
 
 function Register({ onLogin }) {
   const [formData, setFormData] = useState({
@@ -36,12 +37,8 @@ function Register({ onLogin }) {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await apiRequest('/account/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify({
           email: formData.email,
           password: formData.password
@@ -51,6 +48,8 @@ function Register({ onLogin }) {
       const data = await response.json();
 
       if (response.ok && data.success) {
+        // Store the JWT token
+        localStorage.setItem('token', data.token);
         onLogin(data.user);
         navigate('/dashboard');
       } else {
