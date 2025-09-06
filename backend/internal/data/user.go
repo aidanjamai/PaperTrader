@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
-	Password  string    `json:"-"` // Don't include password in JSON
+	Password  string    `json:"-"` 
 	CreatedAt time.Time `json:"created_at"`
 	Balance   float64   `json:"balance"`
 }
@@ -49,21 +50,23 @@ func (us *UserStore) CreateUser(email, password string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
+	email = normalizeEmail(email)
 
 	query := `
 	INSERT INTO users (id, email, password, created_at, balance)
 	VALUES (?, ?, ?, CURRENT_TIMESTAMP, 10000.00)`
 
-	_, err = us.db.Exec(query, userID, email, string(hashedPassword))
+	var user User
+	err = us.db.QueryRow(query, userID, email, string(hashedPassword)).Scan(&user.ID, &user.Email, &user.Password, &user.CreatedAt, &user.Balance)
 	if err != nil {
 		return nil, err
 	}
 
 	return &User{
-		ID:        userID,
-		Email:     email,
-		CreatedAt: time.Now(),
-		Balance:   10000.00, // Starting balance
+		ID:        user.ID,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+		Balance:   user.Balance, // Starting balance
 	}, nil
 }
 
@@ -71,6 +74,7 @@ func (us *UserStore) GetUserByEmail(email string) (*User, error) {
 	query := `SELECT id, email, password, created_at, balance FROM users WHERE email = ?`
 	
 	var user User
+	email = normalizeEmail(email)
 	err := us.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Email, &user.Password,
 		&user.CreatedAt, &user.Balance,
@@ -121,4 +125,8 @@ func (us *UserStore) GetBalance(userID string) (float64, error) {
 	var balance float64
 	err := us.db.QueryRow(query, userID).Scan(&balance)
 	return balance, err
+}
+
+func normalizeEmail(s string) string {
+    return strings.ToLower(strings.TrimSpace(s))
 }
