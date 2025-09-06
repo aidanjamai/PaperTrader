@@ -3,157 +3,151 @@ package account
 import (
 	"encoding/json"
 	"net/http"
+	"papertrader/internal/api/auth"
 	"papertrader/internal/data"
-	
-
-	"github.com/gorilla/sessions"
 )
 
 type AccountHandler struct {
-	Users    data.Users // interface, not concrete type
-	Sessions *sessions.CookieStore
+	Users       data.Users
+	AuthService *auth.AuthService
 }
 
-func NewAccountHandler(users data.Users, sessions *sessions.CookieStore) *AccountHandler {
-	return &AccountHandler{Users: users, Sessions: sessions}
+func NewAccountHandler(users data.Users, authService *auth.AuthService) *AccountHandler {
+	return &AccountHandler{Users: users, AuthService: authService}
 }
 
-// Methods: Register, Login, Logout, GetProfile, IsAuthenticated
+// Helper methods
+func (h *AccountHandler) validateAuthRequest(email, password string) error {
+	if email == "" || password == "" {
+		return &ValidationError{Message: "Email and password are required"}
+	}
+	if len(password) < 6 {
+		return &ValidationError{Message: "Password must be at least 6 characters"}
+	}
+	return nil
+}
 
+func (h *AccountHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, response interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *AccountHandler) writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+	response := AuthResponse{
+		Success: false,
+		Message: message,
+	}
+	h.writeJSONResponse(w, statusCode, response)
+}
+
+// Custom error type
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
+// Handler methods
 func (h *AccountHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// Basic validation
-	if req.Email == "" || req.Password == "" {
-		http.Error(w, "Email and password are required", http.StatusBadRequest)
+	if err := h.validateAuthRequest(req.Email, req.Password); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if len(req.Password) < 6 {
-		http.Error(w, "Password must be at least 6 characters", http.StatusBadRequest)
-		return
-	}
-
-	// Check if email already exists
-	_, err := h.Users.GetUserByEmail(req.Email)
-	if err == nil {
-		http.Error(w, "Email already exists", http.StatusBadRequest)
-		return
-	}
-
-	// Create user
-	user, err := h.Users.CreateUser(req.Email, req.Password)
+	user, token, err := h.AuthService.Register(req.Email, req.Password)
 	if err != nil {
-		http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+		switch err.(type) {
+		case *auth.EmailExistsError:
+			h.writeErrorResponse(w, http.StatusBadRequest, "Email already exists")
+		case *auth.TokenGenerationError:
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
+		default:
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create user")
+		}
 		return
 	}
-
-	// Set session
-	session, _ := h.Sessions.Get(r, "user-session")
-	session.Values["user_id"] = user.ID
-	session.Values["email"] = user.Email
-	session.Save(r, w)
 
 	response := AuthResponse{
 		Success: true,
 		Message: "User registered successfully",
 		User:    user,
+		Token:   token,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+	h.writeJSONResponse(w, http.StatusCreated, response)
 }
 
 func (h *AccountHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// Basic validation
-	if req.Email == "" || req.Password == "" {
-		http.Error(w, "Email and password are required", http.StatusBadRequest)
+	if err := h.validateAuthRequest(req.Email, req.Password); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Get user
-	user, err := h.Users.GetUserByEmail(req.Email)
+	user, token, err := h.AuthService.Login(req.Email, req.Password)
 	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		switch err.(type) {
+		case *auth.InvalidCredentialsError:
+			h.writeErrorResponse(w, http.StatusUnauthorized, "Invalid credentials")
+		case *auth.TokenGenerationError:
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
+		default:
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Login failed")
+		}
 		return
 	}
-
-	// Validate password
-	if !h.Users.ValidatePassword(user, req.Password) {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	// Set session
-	session, _ := h.Sessions.Get(r, "user-session")
-	session.Values["user_id"] = user.ID
-	session.Values["email"] = user.Email
-	session.Save(r, w)
 
 	response := AuthResponse{
 		Success: true,
 		Message: "Login successful",
 		User:    user,
+		Token:   token,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
 func (h *AccountHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	session, _ := h.Sessions.Get(r, "user-session")
-	session.Values["user_id"] = nil
-	session.Values["email"] = nil
-	session.Options.MaxAge = -1
-	session.Save(r, w)
-
 	response := AuthResponse{
 		Success: true,
 		Message: "Logout successful",
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
 func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	session, _ := h.Sessions.Get(r, "user-session")
-	userID, ok := session.Values["user_id"].(string)
-	if !ok {
-		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		h.writeErrorResponse(w, http.StatusUnauthorized, "User ID not found")
 		return
 	}
 
 	user, err := h.Users.GetUserByID(userID)
 	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	h.writeJSONResponse(w, http.StatusOK, user)
 }
 
 func (h *AccountHandler) IsAuthenticated(w http.ResponseWriter, r *http.Request) {
-	session, _ := h.Sessions.Get(r, "user-session")
-	userID, ok := session.Values["user_id"].(string)
-
+	userID := r.Header.Get("X-User-ID")
 	response := AuthResponse{
-		Success: ok && userID != "",
+		Success: userID != "",
 		Message: "Authentication check completed",
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.writeJSONResponse(w, http.StatusOK, response)
 }
