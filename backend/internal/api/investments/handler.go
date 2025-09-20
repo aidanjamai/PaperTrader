@@ -10,13 +10,13 @@ import (
 )
 
 type InvestmentsHandler struct {
-	UserStockStore data.UserStocks
+	UserTradeStore data.UserTrades
 	StockStore     data.Stocks
 	UserStore      data.Users
 }
 
-func NewInvestmentsHandler(userStockStore data.UserStocks) *InvestmentsHandler {
-	return &InvestmentsHandler{UserStockStore: userStockStore}
+func NewInvestmentsHandler(userTradeStore data.UserTrades) *InvestmentsHandler {
+	return &InvestmentsHandler{UserTradeStore: userTradeStore}
 }
 
 func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 	//TODO: add investment to mongodb collection
 
 	log.Printf("Creating user stock buy for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
-	err = Ih.UserStockStore.CreateUserStockBuy(buyStockRequest.Symbol, buyStockRequest.Quantity, price, buyStockRequest.UserID, dateString)
+	err = Ih.UserTradeStore.CreateUserTradeBuy(buyStockRequest.Symbol, buyStockRequest.Quantity, price, buyStockRequest.UserID, dateString)
 	if err != nil {
 		log.Printf("Error creating user stock buy: %v", err)
 		Ih.UserStore.UpdateBalance(buyStockRequest.UserID, userBalance)
@@ -128,7 +128,7 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	//TODO: add investment to mongodb collection
 
 	log.Printf("Creating user stock sell for %s with quantity %d at price %f on date %s", sellStockRequest.Symbol, sellStockRequest.Quantity, price, dateString)
-	err = Ih.UserStockStore.CreateUserStockSell(sellStockRequest.Symbol, sellStockRequest.Quantity, price, sellStockRequest.UserID, dateString)
+	err = Ih.UserTradeStore.CreateUserTradeSell(sellStockRequest.Symbol, sellStockRequest.Quantity, price, sellStockRequest.UserID, dateString)
 	if err != nil {
 		log.Printf("Error creating user stock sell: %v", err)
 		Ih.UserStore.UpdateBalance(sellStockRequest.UserID, user.Balance)
