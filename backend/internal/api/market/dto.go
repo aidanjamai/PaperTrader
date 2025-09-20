@@ -1,15 +1,23 @@
 package market
 
-type StockRequest struct {
-	Function   string `json:"function"`
-	Symbol     string `json:"symbol"`
-	Interval   string `json:"interval"`
-	OutputSize string `json:"outputsize"`
-	DataType   string `json:"datatype"`
+import "time"
+
+type PostStockRequest struct {
+	Symbol string  `json:"symbol"`
+	Price  float64 `json:"price"`
 }
 
 type StockResponse struct {
-	Symbol string  `json:"symbol"`
-	Date   string  `json:"date"`
-	Price  float32 `json:"price"`
+	Symbol    string    `json:"symbol"`
+	Date      string    `json:"date"`
+	Price     float64   `json:"price"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type StockIdRequest struct {
+	ID string `json:"id"`
+}
+
+type StockSymbolRequest struct {
+	Symbol string `json:"symbol"`
 }

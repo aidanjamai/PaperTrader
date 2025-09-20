@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -25,21 +26,21 @@ type ErrorResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-type stockHandler struct {
+type StockHandler struct {
 	stocks data.Stocks
 }
 
-func NewStockHandler(stocks data.Stocks) *stockHandler {
-	return &stockHandler{stocks: stocks}
+func NewStockHandler(stocks data.Stocks) *StockHandler {
+	return &StockHandler{stocks: stocks}
 }
 
-func (h *stockHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, response interface{}) {
+func (h *StockHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, response interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(response)
 }
 
-func (h *stockHandler) writeSuccessResponse(w http.ResponseWriter, statusCode int, message string, data interface{}) {
+func (h *StockHandler) writeSuccessResponse(w http.ResponseWriter, statusCode int, message string, data interface{}) {
 	response := MarketResponse{
 		Success: true,
 		Message: message,
@@ -48,7 +49,7 @@ func (h *stockHandler) writeSuccessResponse(w http.ResponseWriter, statusCode in
 	h.writeJSONResponse(w, statusCode, response)
 }
 
-func (h *stockHandler) writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+func (h *StockHandler) writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
 	response := ErrorResponse{
 		Success: false,
 		Message: message,
@@ -56,23 +57,19 @@ func (h *stockHandler) writeErrorResponse(w http.ResponseWriter, statusCode int,
 	h.writeJSONResponse(w, statusCode, response)
 }
 
-func (h *stockHandler) validateStockRequest(req *StockRequest) error {
+func (h *StockHandler) validateStockRequest(req *StockSymbolRequest) error {
 	if req.Symbol == "" {
 		return fmt.Errorf("symbol is required")
-	}
-	if req.Function == "" {
-		return fmt.Errorf("function is required")
-	}
-	if req.Interval == "" {
-		return fmt.Errorf("interval is required")
 	}
 	return nil
 }
 
 // Handler methods
-func (h *stockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
-	var stockReq StockRequest
-
+func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received stock request: %+v", r.URL.Query().Get("symbol"))
+	var stockReq StockSymbolRequest
+	date := time.Now()
+	dateString := date.Format("01/02/2006")
 	// Validate request method
 	// if r.Method != http.MethodPost {
 	// 	h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Only POST method allowed")
@@ -81,28 +78,34 @@ func (h *stockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 
 	// Decode and validate request
 	if err := json.NewDecoder(r.Body).Decode(&stockReq); err != nil {
+		log.Printf("GetStock: Error decoding JSON: %v", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
 
 	// Validate required fields
 	if err := h.validateStockRequest(&stockReq); err != nil {
+		log.Printf("GetStock: Error validating stock request: %v", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	//check db if stock exists in db for todays date
 	//if it does, return the stock and dont make api request
-	stock, err := h.stocks.GetStockBySymbolAndDate(stockReq.Symbol, time.Now())
+	stock, err := h.stocks.GetStockBySymbolAndDate(stockReq.Symbol, dateString)
 	if err != nil {
+		log.Printf("GetStock: Error getting stock data: %v", err)
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get stock data")
 		return
 	}
+
 	if stock != nil {
+		log.Printf("Returning cached stock data for %s", stockReq.Symbol)
 		h.writeSuccessResponse(w, http.StatusOK, "Stock data retrieved successfully", stock)
 		return
 	}
 
+	log.Printf("Stock %s not found in database for date %s, fetching from API", stockReq.Symbol, dateString)
 	// Check if API key is available
 	apiKey := os.Getenv("ALPHAVANTAGE_API_KEY")
 	if apiKey == "" {
@@ -116,98 +119,271 @@ func (h *stockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorResponse(w, http.StatusServiceUnavailable, "Failed to fetch stock data")
 		return
 	}
+	log.Printf("Stock data fetched from Alpha Vantage for %s with price %f and date %s", stockData.Symbol, stockData.Price, stockData.Date)
+
+	// Update or create stock in database
+	err = h.stocks.UpdateOrCreateStockBySymbol(stockData.Symbol, stockData.Price, stockData.Date)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update/create stock in db")
+		return
+	}
+	log.Printf("Stock data updated/created in db for %s", stockData.Symbol)
 
 	// Return success response
-	h.writeSuccessResponse(w, http.StatusOK, "Stock data retrieved successfully", stockData)
+	h.writeSuccessResponse(w, http.StatusOK, "Stock data retrieved and updated/created in db successfully", stockData)
 }
 
-func (h *stockHandler) fetchStockData(req StockRequest, apiKey string) (interface{}, error) {
-	baseURL := "https://www.alphavantage.co/query"
-	httpReq, err := http.NewRequest("GET", baseURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+func (h *StockHandler) PostStock(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received stock request: %+v", r.URL.Query())
+	var stockReq PostStockRequest
+	date := time.Now()
+	dateString := date.Format("01/02/2006")
 
-	// Add query params
-	q := httpReq.URL.Query()
-	q.Add("function", req.Function)
-	q.Add("symbol", req.Symbol)
-	q.Add("interval", req.Interval)
-	q.Add("apikey", apiKey)
-	httpReq.URL.RawQuery = q.Encode()
-	httpReq.Header.Set("Accept", "application/json")
-
-	// Send request
-	client := &http.Client{}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	// Read response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Parse response
-	//TODO: parse response based on Alpha Vantage response format
-	var apiResponse map[string]interface{}
-	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse API response: %w", err)
-	}
-
-	return apiResponse, nil
-}
-
-// UpdateOrCreateStock updates existing stock or creates new one if it doesn't exist
-func (h *stockHandler) UpdateOrCreateStock(w http.ResponseWriter, r *http.Request) {
-	var req UpdateStockRequest
-
-	// Decode and validate request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Decode and validate request - THIS WAS MISSING!
+	if err := json.NewDecoder(r.Body).Decode(&stockReq); err != nil {
 		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
 
 	// Validate required fields
-	if req.Symbol == "" {
+	if stockReq.Symbol == "" {
 		h.writeErrorResponse(w, http.StatusBadRequest, "Symbol is required")
 		return
 	}
-	if req.Price <= 0 {
+
+	if stockReq.Price <= 0 {
 		h.writeErrorResponse(w, http.StatusBadRequest, "Price must be greater than 0")
 		return
 	}
-	if req.Date == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Date is required")
-		return
-	}
 
-	// Parse date
-	date, err := time.Parse("2006-01-02", req.Date)
+	log.Printf("Processing stock request for %s with price %f", stockReq.Symbol, stockReq.Price)
+
+	err := h.stocks.UpdateOrCreateStockBySymbol(stockReq.Symbol, stockReq.Price, dateString)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid date format. Use YYYY-MM-DD")
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update/create stock in db")
 		return
 	}
+	log.Printf("Stock data updated/created in db for %s", stockReq.Symbol)
 
-	// Update or create stock in database
-	err = h.stocks.UpdateOrCreateStockBySymbol(req.Symbol, req.Price, date)
+	h.writeSuccessResponse(w, http.StatusOK, "Stock data updated/created in db successfully", stockReq)
+}
+
+func (h *StockHandler) GetAllStocks(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received all stocks request")
+	stocks, err := h.stocks.GetAllStocks()
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update/create stock")
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get all stocks")
+		return
+	}
+	h.writeSuccessResponse(w, http.StatusOK, "All stocks retrieved successfully", stocks)
+}
+
+func (h *StockHandler) fetchStockData(req StockSymbolRequest, apiKey string) (StockResponse, error) {
+	baseURL := "https://www.alphavantage.co/query"
+	httpReq, err := http.NewRequest("GET", baseURL, nil)
+	if err != nil {
+		return StockResponse{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add query params
+	q := httpReq.URL.Query()
+	q.Add("function", "GLOBAL_QUOTE")
+	q.Add("symbol", req.Symbol)
+	q.Add("apikey", apiKey)
+	httpReq.URL.RawQuery = q.Encode()
+	httpReq.Header.Set("Accept", "application/json")
+
+	// Send request
+	// Add timeout to HTTP client
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return StockResponse{}, fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return StockResponse{}, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return StockResponse{}, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse response
+	//TODO: parse response based on Alpha Vantage response format
+	var responseMap map[string]interface{}
+	if err := json.Unmarshal(body, &responseMap); err != nil {
+		return StockResponse{}, fmt.Errorf("failed to parse API response: %w", err)
+	}
+	stockResponse, err := h.parseGlobalQuote(responseMap)
+	if err != nil {
+		return StockResponse{}, fmt.Errorf("failed to parse global quote: %w", err)
+	}
+
+	return stockResponse, nil
+}
+
+func (h *StockHandler) parseGlobalQuote(responseMap map[string]interface{}) (StockResponse, error) {
+	globalQuote, exists := responseMap["Global Quote"]
+	if !exists {
+		return StockResponse{}, fmt.Errorf("Global Quote not found in response")
+	}
+
+	quoteMap, ok := globalQuote.(map[string]interface{})
+	if !ok {
+		return StockResponse{}, fmt.Errorf("invalid Global Quote format")
+	}
+
+	// Extract symbol
+	symbolStr, exists := quoteMap["01. symbol"]
+	if !exists {
+		return StockResponse{}, fmt.Errorf("symbol not found in Global Quote")
+	}
+
+	symbol, ok := symbolStr.(string)
+	if !ok {
+		return StockResponse{}, fmt.Errorf("symbol is not a string")
+	}
+
+	// Extract price
+	priceStr, exists := quoteMap["05. price"]
+	if !exists {
+		return StockResponse{}, fmt.Errorf("price not found in Global Quote")
+	}
+
+	price, ok := priceStr.(string)
+	if !ok {
+		return StockResponse{}, fmt.Errorf("price is not a string")
+	}
+
+	// Extract trading day
+	dateStr, exists := quoteMap["07. latest trading day"]
+	if !exists {
+		return StockResponse{}, fmt.Errorf("latest trading day not found")
+	}
+
+	tradingDay, ok := dateStr.(string)
+	if !ok {
+		return StockResponse{}, fmt.Errorf("latest trading day is not a string")
+	}
+
+	// Convert price string to float64
+	var priceFloat float64
+	if _, err := fmt.Sscanf(price, "%f", &priceFloat); err != nil {
+		return StockResponse{}, fmt.Errorf("failed to parse price: %v", err)
+	}
+
+	// Convert date from "2025-09-17" to "09/17/2025" format
+	parsedDate, err := time.Parse("2006-01-02", tradingDay)
+	if err != nil {
+		return StockResponse{}, fmt.Errorf("failed to parse date: %v", err)
+	}
+
+	formattedDate := parsedDate.Format("01/02/2006")
+
+	return StockResponse{
+		Symbol: symbol,
+		Price:  priceFloat,
+		Date:   formattedDate,
+	}, nil
+}
+
+func (h *StockHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": time.Now().Format(time.RFC3339),
+		"service":   "stock-api",
+	}
+	h.writeSuccessResponse(w, http.StatusOK, "Service is healthy", response)
+}
+
+// Delete stock by id
+func (h *StockHandler) DeleteStock(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received delete stock request: %+v", r.URL.Query())
+	var stockReq StockIdRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&stockReq); err != nil {
+		log.Printf("DeleteStock: Error decoding JSON: %v", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
 		return
 	}
 
-	// Return success response
-	h.writeSuccessResponse(w, http.StatusOK, "Stock updated/created successfully", map[string]interface{}{
-		"symbol": req.Symbol,
-		"price":  req.Price,
-		"date":   req.Date,
-	})
+	if stockReq.ID == "" {
+		log.Printf("DeleteStock: Error - ID is required")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Stock ID is required")
+		return
+	}
+
+	log.Printf("DeleteStock: Attempting to delete stock with ID=%s", stockReq.ID)
+
+	err := h.stocks.DeleteStockById(stockReq.ID)
+	if err != nil {
+		log.Printf("DeleteStock: Error deleting stock: %v", err)
+		if err.Error() == "stock not found" {
+			h.writeErrorResponse(w, http.StatusNotFound, "Stock not found")
+		} else {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to delete stock")
+		}
+		return
+	}
+
+	log.Printf("DeleteStock: Successfully deleted stock with ID=%s", stockReq.ID)
+	h.writeSuccessResponse(w, http.StatusOK, "Stock deleted successfully", nil)
+}
+
+// Delete stock by symbol
+func (h *StockHandler) DeleteStockBySymbol(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received delete stock by symbol request: %+v", r.URL.Query())
+	var stockReq StockSymbolRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&stockReq); err != nil {
+		log.Printf("DeleteStockBySymbol: Error decoding JSON: %v", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
+		return
+	}
+
+	if stockReq.Symbol == "" {
+		log.Printf("DeleteStockBySymbol: Error - Symbol is required")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Stock symbol is required")
+		return
+	}
+
+	log.Printf("DeleteStockBySymbol: Attempting to delete stock with Symbol=%s", stockReq.Symbol)
+
+	err := h.stocks.DeleteStockBySymbol(stockReq.Symbol)
+	if err != nil {
+		log.Printf("DeleteStockBySymbol: Error deleting stock: %v", err)
+		if err.Error() == "stock not found" {
+			h.writeErrorResponse(w, http.StatusNotFound, "Stock not found")
+		} else {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to delete stock")
+		}
+		return
+	}
+
+	log.Printf("DeleteStockBySymbol: Successfully deleted stock with Symbol=%s", stockReq.Symbol)
+	h.writeSuccessResponse(w, http.StatusOK, "Stock deleted successfully", nil)
+}
+
+// delete all stocks
+func (h *StockHandler) DeleteAllStocks(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received delete all stocks request: %+v", r.URL.Query())
+
+	log.Printf("DeleteAllStocks: Attempting to delete all stocks")
+
+	err := h.stocks.DeleteAllStocks()
+	if err != nil {
+		log.Printf("DeleteAllStocks: Error deleting all stocks: %v", err)
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to delete all stocks")
+		return
+	}
+
+	log.Printf("DeleteAllStocks: Successfully deleted all stocks")
+	h.writeSuccessResponse(w, http.StatusOK, "All stocks deleted successfully", nil)
 }

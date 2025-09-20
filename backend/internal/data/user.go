@@ -58,7 +58,6 @@ func (us *UserStore) CreateUser(email, password string) (*User, error) {
 	INSERT INTO users (id, email, password, created_at, balance)
 	VALUES (?, ?, ?, CURRENT_TIMESTAMP, 10000.00)`
 
-	// Use Exec for INSERT, not QueryRow
 	_, err = us.db.Exec(query, userID, email, string(hashedPassword))
 	if err != nil {
 		fmt.Println("Error creating user:", err)
