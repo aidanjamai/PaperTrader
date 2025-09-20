@@ -9,5 +9,6 @@ func Routes(h *AccountHandler) *mux.Router {
 	r.HandleFunc("/api/account/logout", h.Logout).Methods("POST")
 	r.HandleFunc("/api/account/profile", h.GetProfile).Methods("GET")
 	r.HandleFunc("/api/account/auth", h.IsAuthenticated).Methods("GET")
+
 	return r
 }
