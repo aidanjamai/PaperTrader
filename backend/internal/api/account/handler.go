@@ -151,3 +151,29 @@ func (h *AccountHandler) IsAuthenticated(w http.ResponseWriter, r *http.Request)
 	}
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
+
+func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	user, err := h.Users.GetUserByID(userID)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, user.Balance)
+}
+
+func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
+	var req UpdateBalanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	err := h.Users.UpdateBalance(req.UserID, req.Balance)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update balance")
+		return
+	}
+	h.writeJSONResponse(w, http.StatusOK, "Balance updated successfully")
+}
