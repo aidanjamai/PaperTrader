@@ -262,7 +262,7 @@ func (ss *StockStore) DeleteAllStocks() error {
 	}
 
 	query := `DELETE FROM stocks`
-	log.Printf("DeleteAllStocks: Executing query: %s")
+	log.Printf("DeleteAllStocks: Executing query")
 
 	result, err := ss.db.Exec(query)
 	if err != nil {

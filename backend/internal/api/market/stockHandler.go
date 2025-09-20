@@ -66,29 +66,22 @@ func (h *StockHandler) validateStockRequest(req *StockSymbolRequest) error {
 
 // Handler methods
 func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received stock request: %+v", r.URL.Query().Get("symbol"))
-	var stockReq StockSymbolRequest
+	// Extract symbol from query parameters for GET request
+	symbol := r.URL.Query().Get("symbol")
+	log.Printf("Received stock request for symbol: %s", symbol)
+
 	date := time.Now()
 	dateString := date.Format("01/02/2006")
-	// Validate request method
-	// if r.Method != http.MethodPost {
-	// 	h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Only POST method allowed")
-	// 	return
-	// }
-
-	// Decode and validate request
-	if err := json.NewDecoder(r.Body).Decode(&stockReq); err != nil {
-		log.Printf("GetStock: Error decoding JSON: %v", err)
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
-		return
-	}
 
 	// Validate required fields
-	if err := h.validateStockRequest(&stockReq); err != nil {
-		log.Printf("GetStock: Error validating stock request: %v", err)
-		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
+	if symbol == "" {
+		log.Printf("GetStock: Error - symbol is required")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Symbol parameter is required")
 		return
 	}
+
+	// Create StockSymbolRequest for compatibility with existing methods
+	stockReq := StockSymbolRequest{Symbol: symbol}
 
 	//check db if stock exists in db for todays date
 	//if it does, return the stock and dont make api request

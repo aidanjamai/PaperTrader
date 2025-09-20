@@ -50,7 +50,6 @@ func main() {
 
 	log.Printf("Server starting on port %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, router))
-	log.Println("Server started on port", port)
 }
 
 func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB) {
