@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"papertrader/internal/data"
+	"papertrader/internal/data/collections"
 )
 
 type InvestmentsHandler struct {
-	UserTradeStore data.UserTrades
+	TradeStore     data.Trades
 	StockStore     data.Stocks
 	UserStore      data.Users
+	UserStockStore collections.UserStocks
 }
 
-func NewInvestmentsHandler(userTradeStore data.UserTrades) *InvestmentsHandler {
-	return &InvestmentsHandler{UserTradeStore: userTradeStore}
+func NewInvestmentsHandler(tradeStore data.Trades) *InvestmentsHandler {
+	return &InvestmentsHandler{TradeStore: tradeStore}
 }
 
 func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
@@ -67,17 +69,38 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("User balance updated to: %f", updatedBalance)
 
-	//TODO: add investment to mongodb collection
-
 	log.Printf("Creating user stock buy for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
-	err = Ih.UserTradeStore.CreateUserTradeBuy(buyStockRequest.Symbol, buyStockRequest.Quantity, price, buyStockRequest.UserID, dateString)
+	err = Ih.TradeStore.CreateTradeBuy(buyStockRequest.Symbol, buyStockRequest.Quantity, price, buyStockRequest.UserID, dateString)
 	if err != nil {
-		log.Printf("Error creating user stock buy: %v", err)
+		log.Printf("Error creating user stock buy trade in db: %v", err)
 		Ih.UserStore.UpdateBalance(buyStockRequest.UserID, userBalance)
 		log.Printf("Refunded user balance to: %f", userBalance)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	//add investment to mongodb collection
+	userStock := &collections.UserStock{
+		UserID:            buyStockRequest.UserID,
+		Symbol:            buyStockRequest.Symbol,
+		Quantity:          buyStockRequest.Quantity,
+		AvgPrice:          price,
+		Total:             totalPrice,
+		CurrentStockPrice: price,
+	}
+	log.Printf("Creating user stock buy for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
+	err = Ih.UserStockStore.UpdateUserStockWithBuy(userStock)
+	if err != nil {
+		log.Printf("Error creating user stock in mongodb collection: %v", err)
+		Ih.UserStore.UpdateBalance(buyStockRequest.UserID, userBalance)
+		log.Printf("Refunded user balance to: %f", userBalance)
+		//TODO: delete trade by userID and symbol
+		// Ih.TradeStore.DeleteTradeByID(buyStockRequest.UserID, buyStockRequest.Symbol)
+		// log.Printf("Deleted user stock buy trade in db")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	log.Printf("User stock buy created for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
 
 	w.WriteHeader(http.StatusOK)
@@ -101,7 +124,18 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// validate user has quatity of stock to sell
-	//TODO:get mongo db collection of user stocks
+
+	userStock, err := Ih.UserStockStore.GetUserStockBySymbol(sellStockRequest.UserID, sellStockRequest.Symbol)
+	if err != nil {
+		log.Printf("Error getting user stock: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if userStock.Quantity < sellStockRequest.Quantity {
+		log.Printf("User does not have enough stock to sell: %d", userStock.Quantity)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	//get stock price
 	stock, err := Ih.StockStore.GetStockBySymbol(sellStockRequest.Symbol)
@@ -126,9 +160,20 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	log.Printf("User balance updated to: %f", updatedBalance)
 
 	//TODO: add investment to mongodb collection
+	userStock.Quantity -= sellStockRequest.Quantity
+	userStock.CurrentStockPrice = price
+	userStock.Total = price * float64(sellStockRequest.Quantity)
+	err = Ih.UserStockStore.UpdateUserStockWithSell(userStock)
+	if err != nil {
+		log.Printf("Error updating user stock in mongodb collection: %v", err)
+		Ih.UserStore.UpdateBalance(sellStockRequest.UserID, user.Balance)
+		log.Printf("Refunded user balance to: %f", user.Balance)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	log.Printf("Creating user stock sell for %s with quantity %d at price %f on date %s", sellStockRequest.Symbol, sellStockRequest.Quantity, price, dateString)
-	err = Ih.UserTradeStore.CreateUserTradeSell(sellStockRequest.Symbol, sellStockRequest.Quantity, price, sellStockRequest.UserID, dateString)
+	err = Ih.TradeStore.CreateTradeSell(sellStockRequest.Symbol, sellStockRequest.Quantity, price, sellStockRequest.UserID, dateString)
 	if err != nil {
 		log.Printf("Error creating user stock sell: %v", err)
 		Ih.UserStore.UpdateBalance(sellStockRequest.UserID, user.Balance)
