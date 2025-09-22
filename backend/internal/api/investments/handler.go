@@ -17,8 +17,8 @@ type InvestmentsHandler struct {
 	UserStockStore collections.UserStocks
 }
 
-func NewInvestmentsHandler(tradeStore data.Trades) *InvestmentsHandler {
-	return &InvestmentsHandler{TradeStore: tradeStore}
+func NewInvestmentsHandler(tradeStore data.Trades, stockStore data.Stocks, userStore data.Users, userStockStore collections.UserStocks) *InvestmentsHandler {
+	return &InvestmentsHandler{TradeStore: tradeStore, StockStore: stockStore, UserStore: userStore, UserStockStore: userStockStore}
 }
 
 func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +159,7 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	}
 	log.Printf("User balance updated to: %f", updatedBalance)
 
-	//TODO: add investment to mongodb collection
+	// add investment to mongodb collection
 	userStock.Quantity -= sellStockRequest.Quantity
 	userStock.CurrentStockPrice = price
 	userStock.Total = price * float64(sellStockRequest.Quantity)
@@ -182,4 +182,16 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	log.Printf("User stock sell created for %s with quantity %d at price %f on date %s", sellStockRequest.Symbol, sellStockRequest.Quantity, price, dateString)
+}
+
+func (Ih *InvestmentsHandler) GetUserStocks(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("userID")
+	userStocks, err := Ih.UserStockStore.GetUserStocksByUserID(userID)
+	if err != nil {
+		log.Printf("Error getting user stocks: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(userStocks)
 }

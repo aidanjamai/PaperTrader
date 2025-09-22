@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"log"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -16,11 +15,19 @@ type MongoDBConfig struct {
 	Collection string
 }
 
+// func NewMongoDBConfig() *MongoDBConfig {
+// 	return &MongoDBConfig{
+// 		URI:        os.Getenv("MONGODB_URI"),
+// 		Database:   os.Getenv("MONGODB_DATABASE"),
+// 		Collection: os.Getenv("MONGODB_COLLECTION"),
+// 	}
+// }
+
 func NewMongoDBConfig() *MongoDBConfig {
 	return &MongoDBConfig{
-		URI:        os.Getenv("MONGODB_URI"),
-		Database:   os.Getenv("MONGODB_DATABASE"),
-		Collection: os.Getenv("MONGODB_COLLECTION"),
+		URI:        "mongodb+srv://aidansj:Dr9GFmTewaVELpbh@cluster0.4r9q7sh.mongodb.net/",
+		Database:   "PaperTrader",
+		Collection: "UserStock",
 	}
 }
 

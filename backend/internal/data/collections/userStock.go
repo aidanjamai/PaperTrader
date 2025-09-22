@@ -3,6 +3,7 @@ package collections
 import (
 	"context"
 	"errors"
+	"papertrader/internal/config"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,9 +31,9 @@ type UserStockMongoStore struct {
 }
 
 // NewUserStockMongoStore creates a new MongoDB store for user stocks
-func NewUserStockMongoStore(client *mongo.Client, database, collection string) *UserStockMongoStore {
-	db := client.Database(database)
-	col := db.Collection(collection)
+func NewUserStockMongoStore(client *mongo.Client, mongoDBConfig *config.MongoDBConfig) *UserStockMongoStore {
+	db := client.Database(mongoDBConfig.Database)
+	col := db.Collection(mongoDBConfig.Collection)
 	return &UserStockMongoStore{collection: col}
 }
 
