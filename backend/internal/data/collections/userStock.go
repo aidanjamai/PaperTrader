@@ -3,6 +3,7 @@ package collections
 import (
 	"context"
 	"errors"
+	"log"
 	"papertrader/internal/config"
 	"time"
 
@@ -24,6 +25,8 @@ type UserStock struct {
 	CreatedAt         time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at" bson:"updated_at"`
 }
+
+var ErrStockHoldingNotFound = errors.New("stock holding not found")
 
 // UserStockMongoStore handles MongoDB operations for user stocks
 type UserStockMongoStore struct {
@@ -59,10 +62,11 @@ func (us *UserStockMongoStore) Init() error {
 func (us *UserStockMongoStore) CreateUserStock(userStock *UserStock) (*UserStock, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	log.Println("Creating user stock", userStock)
 
 	//check if userStock already exists
 	existingUserStock, err := us.GetUserStockBySymbol(userStock.UserID, userStock.Symbol)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrStockHoldingNotFound) {
 		return nil, err
 	}
 	if existingUserStock != nil {
@@ -84,9 +88,12 @@ func (us *UserStockMongoStore) UpdateUserStockWithBuy(userStock *UserStock) erro
 
 	//check if userStock already exists
 	existingUserStock, err := us.GetUserStockBySymbol(userStock.UserID, userStock.Symbol)
-	if err != nil {
+
+	if err != nil && !errors.Is(err, ErrStockHoldingNotFound) {
 		return err
 	}
+	log.Println("Existing user stock", existingUserStock)
+	err = nil
 	if existingUserStock == nil {
 		existingUserStock, err = us.CreateUserStock(userStock)
 		if err != nil {
@@ -173,10 +180,11 @@ func (us *UserStockMongoStore) GetUserStockBySymbol(userID, symbol string) (*Use
 	}
 
 	var stock UserStock
+
 	err := us.collection.FindOne(ctx, filter).Decode(&stock)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, errors.New("stock holding not found")
+			return nil, ErrStockHoldingNotFound
 		}
 		return nil, err
 	}

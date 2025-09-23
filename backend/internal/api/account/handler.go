@@ -2,6 +2,7 @@ package account
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"papertrader/internal/api/auth"
 	"papertrader/internal/data"
@@ -176,4 +177,14 @@ func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSONResponse(w, http.StatusOK, "Balance updated successfully")
+}
+
+func (h *AccountHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.Users.GetAllUsers()
+	log.Println("Users:", users)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get all users")
+		return
+	}
+	h.writeJSONResponse(w, http.StatusOK, GetAllUsersResponse{Users: users})
 }

@@ -11,6 +11,7 @@ func Routes(h *AccountHandler) *mux.Router {
 	r.HandleFunc("/api/account/auth", h.IsAuthenticated).Methods("GET")
 	r.HandleFunc("/api/account/balance", h.GetBalance).Methods("GET")
 	r.HandleFunc("/api/account/update-balance", h.UpdateBalance).Methods("POST")
+	r.HandleFunc("/api/account/users", h.GetAllUsers).Methods("GET")
 
 	return r
 }

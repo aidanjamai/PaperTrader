@@ -29,6 +29,9 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	log.Printf("Stock symbol: %s", buyStockRequest.Symbol)
+	log.Printf("User ID: %s", buyStockRequest.UserID)
+	log.Printf("Quantity: %d", buyStockRequest.Quantity)
 
 	//get stock price
 	stock, err := Ih.StockStore.GetStockBySymbol(buyStockRequest.Symbol)
@@ -37,7 +40,7 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	log.Printf("Stock price: %f", stock.Price)
 	user, err := Ih.UserStore.GetUserByID(buyStockRequest.UserID)
 	if err != nil {
 		log.Printf("Error getting user: %v", err)
@@ -88,7 +91,7 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 		Total:             totalPrice,
 		CurrentStockPrice: price,
 	}
-	log.Printf("Creating user stock buy for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
+	//log.Printf("Creating user stock buy for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
 	err = Ih.UserStockStore.UpdateUserStockWithBuy(userStock)
 	if err != nil {
 		log.Printf("Error creating user stock in mongodb collection: %v", err)
@@ -104,6 +107,7 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 	log.Printf("User stock buy created for %s with quantity %d at price %f on date %s", buyStockRequest.Symbol, buyStockRequest.Quantity, price, dateString)
 
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(userStock)
 }
 
 func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +186,9 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	log.Printf("User stock sell created for %s with quantity %d at price %f on date %s", sellStockRequest.Symbol, sellStockRequest.Quantity, price, dateString)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(userStock)
 }
 
 func (Ih *InvestmentsHandler) GetUserStocks(w http.ResponseWriter, r *http.Request) {

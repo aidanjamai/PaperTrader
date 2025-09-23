@@ -23,3 +23,7 @@ type UpdateBalanceRequest struct {
 	UserID  string  `json:"user_id"`
 	Balance float64 `json:"balance"`
 }
+
+type GetAllUsersResponse struct {
+	Users []data.User `json:"users"`
+}

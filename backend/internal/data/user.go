@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -111,6 +112,30 @@ func (us *UserStore) GetUserByID(id string) (*User, error) {
 	}
 
 	return &user, nil
+}
+
+func (us *UserStore) GetAllUsers() ([]User, error) {
+	log.Println("Getting all users")
+	query := `SELECT id, email, password, created_at, balance FROM users`
+	var users []User
+	//GETT ALL USERS FROM THE DATABASE
+	rows, err := us.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var user User
+		err = rows.Scan(
+			&user.ID, &user.Email, &user.Password,
+			&user.CreatedAt, &user.Balance)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+
+	return users, err
 }
 
 func (us *UserStore) ValidatePassword(user *User, password string) bool {

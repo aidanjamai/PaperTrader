@@ -1,13 +1,13 @@
 package investments
 
 type BuyStockRequest struct {
-	UserID   string `json:"user_id"`
+	UserID   string `json:"userId"`
 	Symbol   string `json:"symbol"`
 	Quantity int    `json:"quantity"`
 }
 
 type SellStockRequest struct {
-	UserID   string `json:"user_id"`
+	UserID   string `json:"userId"`
 	Symbol   string `json:"symbol"`
 	Quantity int    `json:"quantity"`
 }
@@ -23,7 +23,7 @@ type TradeResponse struct {
 
 type UserStock struct {
 	ID       string  `json:"id"`
-	UserID   string  `json:"user_id"`
+	UserID   string  `json:"userId"`
 	Symbol   string  `json:"symbol"`
 	Quantity int     `json:"quantity"`
 	AvgPrice float64 `json:"avg_price"`
