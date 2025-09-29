@@ -56,7 +56,7 @@ func (Ih *InvestmentsHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 	//validate user balance
 	if updatedBalance < 0 {
 		log.Printf("User does not have enough funds to buy stock balance: %f, total price: %f", userBalance, totalPrice)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "insufficient funds", http.StatusBadRequest)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	}
 	if userStock.Quantity < sellStockRequest.Quantity {
 		log.Printf("User does not have enough stock to sell: %d", userStock.Quantity)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "insufficient stock quantity", http.StatusBadRequest)
 		return
 	}
 

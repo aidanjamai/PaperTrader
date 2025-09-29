@@ -135,7 +135,12 @@ func (us *UserStore) GetAllUsers() ([]User, error) {
 		users = append(users, user)
 	}
 
-	return users, err
+	// Check for errors that occurred during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
 
 func (us *UserStore) ValidatePassword(user *User, password string) bool {

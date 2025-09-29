@@ -102,8 +102,9 @@ func (us *UserStockMongoStore) UpdateUserStockWithBuy(userStock *UserStock) erro
 	}
 
 	//update existing userStock with buy
+	originalQuantity := existingUserStock.Quantity
 	existingUserStock.Quantity += userStock.Quantity
-	existingUserStock.AvgPrice = (existingUserStock.AvgPrice*float64(existingUserStock.Quantity) + userStock.AvgPrice*float64(userStock.Quantity)) / float64(existingUserStock.Quantity+userStock.Quantity)
+	existingUserStock.AvgPrice = (existingUserStock.AvgPrice*float64(originalQuantity) + userStock.AvgPrice*float64(userStock.Quantity)) / float64(existingUserStock.Quantity)
 	existingUserStock.CurrentStockPrice = userStock.CurrentStockPrice
 	existingUserStock.Total = existingUserStock.AvgPrice * float64(existingUserStock.Quantity)
 	existingUserStock.UpdatedAt = time.Now()
