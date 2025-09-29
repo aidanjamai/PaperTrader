@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -8,12 +9,16 @@ import (
 
 	"papertrader/internal/api/account"
 	"papertrader/internal/api/auth"
+	"papertrader/internal/api/investments"
 	"papertrader/internal/api/market"
 	"papertrader/internal/api/middleware"
+	"papertrader/internal/config"
 	"papertrader/internal/data"
+	"papertrader/internal/data/collections"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/mongo"
 	_ "modernc.org/sqlite"
 )
 
@@ -23,8 +28,9 @@ func main() {
 		log.Println("No .env file found, using system environment variables")
 	}
 
-	router, accountHandler, marketHandler, db := initialize()
+	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize()
 	defer db.Close()
+	defer mongoDBClient.Disconnect(context.Background())
 
 	// CORS middleware
 	router.Use(middleware.CORS())
@@ -33,6 +39,7 @@ func main() {
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.PathPrefix("/account").Handler(account.Routes(accountHandler))
 	apiRouter.PathPrefix("/market").Handler(market.Routes(marketHandler))
+	apiRouter.PathPrefix("/investments").Handler(investments.Routes(investmentsHandler))
 
 	// Debug: Print all routes
 	// router.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
@@ -52,7 +59,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB) {
+func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
 	// Initialize database
 	db, err := sql.Open("sqlite", "./papertrader.db")
 	if err != nil {
@@ -62,6 +69,13 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 	// Test database connection
 	if err := db.Ping(); err != nil {
 		log.Fatal("Failed to ping database:", err)
+	}
+
+	// Initialize MongoDB
+	mongoDBConfig := config.NewMongoDBConfig()
+	mongoDBClient, err := config.ConnectMongoDB(mongoDBConfig)
+	if err != nil {
+		log.Fatal("Failed to connect to MongoDB:", err)
 	}
 
 	// Initialize user store
@@ -76,6 +90,18 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 		log.Fatal("Failed to initialize stock store:", err)
 	}
 
+	// Initialize trade store
+	tradeStore := data.NewTradesStore(db)
+	if err := tradeStore.Init(); err != nil {
+		log.Fatal("Failed to initialize trade store:", err)
+	}
+
+	// Initialize user stock store
+	userStockStore := collections.NewUserStockMongoStore(mongoDBClient, mongoDBConfig)
+	if err := userStockStore.Init(); err != nil {
+		log.Fatal("Failed to initialize user stock store:", err)
+	}
+
 	// Initialize JWT service
 	jwtService := auth.NewJWTService("your-secret-key-here")
 
@@ -88,8 +114,11 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 	// Initialize market handler
 	marketHandler := market.NewStockHandler(stockStore)
 
+	// Initialize investments handler
+	investmentsHandler := investments.NewInvestmentsHandler(tradeStore, stockStore, userStore, userStockStore)
+
 	// Setup router
 	router := mux.NewRouter()
 
-	return router, accountHandler, marketHandler, db
+	return router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler
 }
