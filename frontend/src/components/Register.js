@@ -50,6 +50,7 @@ function Register({ onLogin }) {
       if (response.ok && data.success) {
         // Store the JWT token
         localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
         onLogin(data.user);
         navigate('/dashboard');
       } else {

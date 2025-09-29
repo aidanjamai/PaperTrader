@@ -32,6 +32,7 @@ function Navbar({ isAuthenticated, user, onLogout }) {
                   Welcome, {user?.email}!
                 </span>
                 <Link to="/dashboard">Dashboard</Link>
+                <Link to="/trade">Trade</Link>
                 <button 
                   onClick={handleLogout}
                   className="btn btn-secondary"
