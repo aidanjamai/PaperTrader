@@ -102,6 +102,12 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 		log.Fatal("Failed to initialize user stock store:", err)
 	}
 
+	// Initialize intra daily store
+	intraDailyStore := collections.NewIntraDailyMongoStore(mongoDBClient, mongoDBConfig)
+	if err := intraDailyStore.Init(); err != nil {
+		log.Fatal("Failed to initialize intra daily store:", err)
+	}
+
 	// Initialize JWT service
 	jwtService := auth.NewJWTService("your-secret-key-here")
 
@@ -112,7 +118,7 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 	accountHandler := account.NewAccountHandler(userStore, authService)
 
 	// Initialize market handler
-	marketHandler := market.NewStockHandler(stockStore)
+	marketHandler := market.NewStockHandler(stockStore, intraDailyStore)
 
 	// Initialize investments handler
 	investmentsHandler := investments.NewInvestmentsHandler(tradeStore, stockStore, userStore, userStockStore)

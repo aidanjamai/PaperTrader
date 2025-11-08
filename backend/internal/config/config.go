@@ -5,16 +5,16 @@ import (
 )
 
 type Config struct {
-	Port            string
-	AlphaVantageKey string
-	DatabasePath    string
+	Port           string
+	MarketStackKey string
+	DatabasePath   string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:            getEnv("PORT", "8080"),
-		AlphaVantageKey: getEnv("ALPHAVANTAGE_API_KEY", ""),
-		DatabasePath:    getEnv("DATABASE_PATH", "./papertrader.db"),
+		Port:           getEnv("PORT", "8080"),
+		MarketStackKey: getEnv("MARKETSTACK_API_KEY", ""),
+		DatabasePath:   getEnv("DATABASE_PATH", "./papertrader.db"),
 	}
 }
 

@@ -67,9 +67,9 @@ The system uses a simplified user model with the following fields:
 3. **Run the server:**
    ```bash
    go run main.go
-   ```
+   ```http://localhost:8080
 
-   The server will start on `http://localhost:8080`
+   The server will start on ``
 
 ### Frontend Setup
 

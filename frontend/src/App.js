@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+//import Navbar from './components/Navbar';
 import Navbar from './components/Navbar';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import Home from './components/Home';
 import Trade from './components/Trade';
+import Calculator from './components/Calculator';
+import CompoundInterest from './components/CompoundInterest';
 import './App.css';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     checkAuthStatus();
@@ -104,6 +107,14 @@ function App() {
                 <Trade user={user} /> : 
                 <Navigate to="/login" replace />
               } 
+            />
+            <Route 
+              path="/calculator" 
+              element={<Calculator />} 
+            />
+            <Route 
+              path="/compound-interest" 
+              element={<CompoundInterest />} 
             />
           </Routes>
         </div>
