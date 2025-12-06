@@ -1,0 +1,22 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+main
+
+# Database
+*.db
+*.sqlite
+
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+
+# Docker
+Dockerfile
+.dockerignore
+

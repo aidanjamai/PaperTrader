@@ -28,7 +28,8 @@ func main() {
 		log.Println("No .env file found, using system environment variables")
 	}
 
-	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize()
+	cfg := config.Load()
+	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize(cfg)
 	defer db.Close()
 	defer mongoDBClient.Disconnect(context.Background())
 
@@ -59,9 +60,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
+func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
 	// Initialize database
-	db, err := sql.Open("sqlite", "./papertrader.db")
+	db, err := sql.Open("sqlite", cfg.DatabasePath)
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
