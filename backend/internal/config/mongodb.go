@@ -26,7 +26,7 @@ type MongoDBConfig struct {
 
 func NewMongoDBConfig() *MongoDBConfig {
 	return &MongoDBConfig{
-		URI:                  getEnv("MONGODB_URI", ""),
+		URI:                  getEnv("MONGODB_URI", "mongodb://localhost:27017"),
 		Database:             getEnv("MONGODB_DATABASE", "PaperTrader"),
 		UserStockCollection:  getEnv("MONGODB_USER_STOCK_COLLECTION", "UserStock"),
 		IntraDailyCollection: getEnv("MONGODB_INTRA_DAILY_COLLECTION", "IntraDaily"),

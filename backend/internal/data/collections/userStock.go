@@ -151,6 +151,9 @@ func (us *UserStockMongoStore) UpdateUserStockWithSell(userStock *UserStock) err
 	existingUserStock.UpdatedAt = time.Now()
 
 	_, err = us.collection.UpdateOne(ctx, bson.M{"user_id": userStock.UserID, "symbol": userStock.Symbol}, bson.M{"$set": existingUserStock})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
