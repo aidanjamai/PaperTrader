@@ -164,7 +164,8 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	log.Printf("User balance updated to: %f", updatedBalance)
 
 	// add investment to mongodb collection
-	userStock.Quantity -= sellStockRequest.Quantity
+	//userStock.Quantity -= sellStockRequest.Quantity
+	userStock.Quantity = sellStockRequest.Quantity // Pass the sell quantity, let the store handle subtraction
 	userStock.CurrentStockPrice = price
 	userStock.Total = price * float64(userStock.Quantity)
 	err = Ih.UserStockStore.UpdateUserStockWithSell(userStock)

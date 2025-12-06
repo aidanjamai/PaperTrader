@@ -144,10 +144,10 @@ func (us *UserStockMongoStore) UpdateUserStockWithSell(userStock *UserStock) err
 
 	//update existing userStock with sell
 	log.Println("Updating userStock with sell existing quantity:", existingUserStock.Quantity, "quantity requested:", userStock.Quantity)
-	existingUserStock.Quantity = userStock.Quantity
+	existingUserStock.Quantity -= userStock.Quantity
 	log.Println("Updated userStock quantity:", existingUserStock.Quantity)
 	existingUserStock.CurrentStockPrice = userStock.CurrentStockPrice
-	existingUserStock.Total = userStock.Total
+	existingUserStock.Total = existingUserStock.AvgPrice * float64(existingUserStock.Quantity)
 	existingUserStock.UpdatedAt = time.Now()
 
 	_, err = us.collection.UpdateOne(ctx, bson.M{"user_id": userStock.UserID, "symbol": userStock.Symbol}, bson.M{"$set": existingUserStock})
