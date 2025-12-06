@@ -10,9 +10,10 @@ import (
 )
 
 type MongoDBConfig struct {
-	URI        string
-	Database   string
-	Collection string
+	URI                  string
+	Database             string
+	UserStockCollection  string
+	IntraDailyCollection string
 }
 
 // func NewMongoDBConfig() *MongoDBConfig {
@@ -25,9 +26,10 @@ type MongoDBConfig struct {
 
 func NewMongoDBConfig() *MongoDBConfig {
 	return &MongoDBConfig{
-		URI:        "mongodb+srv://aidansj:Dr9GFmTewaVELpbh@cluster0.4r9q7sh.mongodb.net/",
-		Database:   "PaperTrader",
-		Collection: "UserStock",
+		URI:                  getEnv("MONGODB_URI", "mongodb://localhost:27017"),
+		Database:             getEnv("MONGODB_DATABASE", "PaperTrader"),
+		UserStockCollection:  getEnv("MONGODB_USER_STOCK_COLLECTION", "UserStock"),
+		IntraDailyCollection: getEnv("MONGODB_INTRA_DAILY_COLLECTION", "IntraDaily"),
 	}
 }
 

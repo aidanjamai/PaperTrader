@@ -28,7 +28,8 @@ func main() {
 		log.Println("No .env file found, using system environment variables")
 	}
 
-	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize()
+	cfg := config.Load()
+	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize(cfg)
 	defer db.Close()
 	defer mongoDBClient.Disconnect(context.Background())
 
@@ -59,9 +60,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
+func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
 	// Initialize database
-	db, err := sql.Open("sqlite", "./papertrader.db")
+	db, err := sql.Open("sqlite", cfg.DatabasePath)
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
@@ -102,6 +103,12 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 		log.Fatal("Failed to initialize user stock store:", err)
 	}
 
+	// Initialize intra daily store
+	intraDailyStore := collections.NewIntraDailyMongoStore(mongoDBClient, mongoDBConfig)
+	if err := intraDailyStore.Init(); err != nil {
+		log.Fatal("Failed to initialize intra daily store:", err)
+	}
+
 	// Initialize JWT service
 	jwtService := auth.NewJWTService("your-secret-key-here")
 
@@ -112,7 +119,7 @@ func initialize() (*mux.Router, *account.AccountHandler, *market.StockHandler, *
 	accountHandler := account.NewAccountHandler(userStore, authService)
 
 	// Initialize market handler
-	marketHandler := market.NewStockHandler(stockStore)
+	marketHandler := market.NewStockHandler(stockStore, intraDailyStore)
 
 	// Initialize investments handler
 	investmentsHandler := investments.NewInvestmentsHandler(tradeStore, stockStore, userStore, userStockStore)

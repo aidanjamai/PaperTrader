@@ -164,10 +164,19 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	log.Printf("User balance updated to: %f", updatedBalance)
 
 	// add investment to mongodb collection
-	userStock.Quantity -= sellStockRequest.Quantity
-	userStock.CurrentStockPrice = price
-	userStock.Total = price * float64(sellStockRequest.Quantity)
-	err = Ih.UserStockStore.UpdateUserStockWithSell(userStock)
+	sellUpdate := &collections.UserStock{
+		UserID:            userStock.UserID,
+		Symbol:            userStock.Symbol,
+		Quantity:          sellStockRequest.Quantity,
+		CurrentStockPrice: price,
+	}
+
+	err = Ih.UserStockStore.UpdateUserStockWithSell(sellUpdate)
+	if err == nil {
+		userStock.Quantity -= sellStockRequest.Quantity
+		userStock.CurrentStockPrice = price
+		userStock.Total = userStock.AvgPrice * float64(userStock.Quantity)
+	}
 	if err != nil {
 		log.Printf("Error updating user stock in mongodb collection: %v", err)
 		Ih.UserStore.UpdateBalance(sellStockRequest.UserID, user.Balance)

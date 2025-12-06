@@ -18,3 +18,19 @@ type StockIdRequest struct {
 type StockSymbolRequest struct {
 	Symbol string `json:"symbol"`
 }
+
+type StockHistoricalDataDailyRequest struct {
+	Symbol    string `json:"symbol"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+}
+
+type StockHistoricalDataDailyResponse struct {
+	Symbol           string  `json:"symbol"`
+	Date             string  `json:"date"`
+	PreviousPrice    float64 `json:"previous_price"`
+	Price            float64 `json:"price"`
+	Volume           int     `json:"volume"`
+	Change           float64 `json:"change"`
+	ChangePercentage float64 `json:"change_percentage"`
+}

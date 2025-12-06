@@ -36,7 +36,7 @@ type UserStockMongoStore struct {
 // NewUserStockMongoStore creates a new MongoDB store for user stocks
 func NewUserStockMongoStore(client *mongo.Client, mongoDBConfig *config.MongoDBConfig) *UserStockMongoStore {
 	db := client.Database(mongoDBConfig.Database)
-	col := db.Collection(mongoDBConfig.Collection)
+	col := db.Collection(mongoDBConfig.UserStockCollection)
 	return &UserStockMongoStore{collection: col}
 }
 
@@ -121,10 +121,12 @@ func (us *UserStockMongoStore) UpdateUserStockWithBuy(userStock *UserStock) erro
 func (us *UserStockMongoStore) UpdateUserStockWithSell(userStock *UserStock) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	//log.Println("Updating userStock with sell", userStock)
 
 	//check if userStock already exists
 	existingUserStock, err := us.GetUserStockBySymbol(userStock.UserID, userStock.Symbol)
 	if err != nil {
+		log.Println("Error getting userStock", err)
 		return err
 	}
 	if existingUserStock == nil {
@@ -132,21 +134,26 @@ func (us *UserStockMongoStore) UpdateUserStockWithSell(userStock *UserStock) err
 	}
 
 	//check if userStock quantity is greater than existing userStock quantity
-	if existingUserStock.Quantity < userStock.Quantity {
+	if userStock.Quantity > existingUserStock.Quantity {
 		return errors.New("userStock quantity is greater than existing userStock quantity")
 	}
 	//check if userStock quantity is less than 0
-	if existingUserStock.Quantity-userStock.Quantity < 0 {
-		return errors.New("userStock quantity is less than 0")
+	if userStock.Quantity < 0 {
+		return errors.New("user does not have enough stock to sell")
 	}
 
 	//update existing userStock with sell
+	log.Println("Updating userStock with sell existing quantity:", existingUserStock.Quantity, "quantity requested:", userStock.Quantity)
 	existingUserStock.Quantity -= userStock.Quantity
+	log.Println("Updated userStock quantity:", existingUserStock.Quantity)
 	existingUserStock.CurrentStockPrice = userStock.CurrentStockPrice
 	existingUserStock.Total = existingUserStock.AvgPrice * float64(existingUserStock.Quantity)
 	existingUserStock.UpdatedAt = time.Now()
 
 	_, err = us.collection.UpdateOne(ctx, bson.M{"user_id": userStock.UserID, "symbol": userStock.Symbol}, bson.M{"$set": existingUserStock})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

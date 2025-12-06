@@ -29,9 +29,12 @@ function Navbar({ isAuthenticated, user, onLogout }) {
             {isAuthenticated ? (
               <>
                 <span className="welcome-message">
-                  Welcome, {user?.email}!
+                  {/* Welcome, {user?.email}! */}
                 </span>
                 <Link to="/dashboard">Dashboard</Link>
+                <Link to="/trade">Trade</Link>
+                <Link to="/calculator">Calculator</Link>
+                <Link to="/compound-interest">Compound Interest</Link>
                 <button 
                   onClick={handleLogout}
                   className="btn btn-secondary"

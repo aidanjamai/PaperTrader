@@ -28,3 +28,13 @@
   }
 }
 
+.calculator-card {
+  max-width: 1000px !important;
+  width: 100%;
+}
+
+.calculator-card .card {
+  max-width: 1000px !important;
+  width: 100%;
+}
+

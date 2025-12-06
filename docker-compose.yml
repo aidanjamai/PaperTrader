@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DATABASE=PaperTrader
+      - DATABASE_PATH=/root/papertrader.db
+    volumes:
+      - ./backend/papertrader.db:/root/papertrader.db
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: rebuild
+          path: ./backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    stdin_open: true
+    tty: true
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
+        - action: sync
+          path: ./frontend/public
+          target: /app/public
+        - action: rebuild
+          path: ./frontend/package.json
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  mongodb_data:
