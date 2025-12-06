@@ -18,9 +18,9 @@ type IntraDaily struct {
 }
 
 type IntraDailyRequest struct {
-	Symbol    string `json:"symbol"`
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
+	Symbol    string `json:"symbol" bson:"symbol"`
+	StartDate string `json:"start_date" bson:"start_date"`
+	EndDate   string `json:"end_date" bson:"end_date"`
 }
 
 type IntraDailyResponse struct {
@@ -92,9 +92,9 @@ func (id *IntraDailyMongoStore) GetIntraDailyByRequest(intraDaily *IntraDailyReq
 
 	//check if intraDaily already exists
 	filter := bson.M{
-		"request.symbol":     intraDaily.Symbol,
-		"request.start_date": intraDaily.StartDate,
-		"request.end_date":   intraDaily.EndDate,
+		"symbol":     intraDaily.Symbol,
+		"start_date": intraDaily.StartDate,
+		"end_date":   intraDaily.EndDate,
 	}
 
 	var foundIntraDaily IntraDaily

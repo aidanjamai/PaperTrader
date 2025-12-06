@@ -134,11 +134,11 @@ func (us *UserStockMongoStore) UpdateUserStockWithSell(userStock *UserStock) err
 	}
 
 	//check if userStock quantity is greater than existing userStock quantity
-	if existingUserStock.Quantity < userStock.Quantity {
+	if userStock.Quantity > existingUserStock.Quantity {
 		return errors.New("userStock quantity is greater than existing userStock quantity")
 	}
 	//check if userStock quantity is less than 0
-	if existingUserStock.Quantity-userStock.Quantity < 0 {
+	if userStock.Quantity < 0 {
 		return errors.New("user does not have enough stock to sell")
 	}
 

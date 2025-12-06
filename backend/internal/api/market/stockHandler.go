@@ -30,21 +30,21 @@ const (
 var symbolRegex = regexp.MustCompile(`^[A-Z]{1,10}(\.[A-Z]{1,2})?$`)
 
 // validateSymbol validates stock symbol format
-func validateSymbol(symbol string) error {
+func validateSymbol(symbol string) (string, error) {
 	if symbol == "" {
-		return fmt.Errorf("symbol is required")
+		return "", fmt.Errorf("symbol is required")
 	}
 
 	symbol = strings.TrimSpace(strings.ToUpper(symbol))
 	if len(symbol) > MaxSymbolLength {
-		return fmt.Errorf("symbol too long (max %d characters)", MaxSymbolLength)
+		return "", fmt.Errorf("symbol too long (max %d characters)", MaxSymbolLength)
 	}
 
 	if !symbolRegex.MatchString(symbol) {
-		return fmt.Errorf("invalid symbol format (must be uppercase letters, optionally with .suffix)")
+		return "", fmt.Errorf("invalid symbol format (must be uppercase letters, optionally with .suffix)")
 	}
 
-	return nil
+	return symbol, nil
 }
 
 // validatePrice validates price values
@@ -170,7 +170,9 @@ func (h *StockHandler) validateStockSymbolRequest(req *StockSymbolRequest) error
 	}
 
 	req.Symbol = sanitizeString(req.Symbol)
-	return validateSymbol(req.Symbol)
+	var err error
+	req.Symbol, err = validateSymbol(req.Symbol)
+	return err
 }
 
 // =============================================================================
@@ -182,7 +184,9 @@ func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 	symbol := sanitizeString(r.URL.Query().Get("symbol"))
 
 	// Validate input
-	if err := validateSymbol(symbol); err != nil {
+	var err error
+	symbol, err = validateSymbol(symbol)
+	if err != nil {
 		log.Printf("GetStock: validation error for symbol %s: %v", symbol, err)
 		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
@@ -245,7 +249,9 @@ func (h *StockHandler) PostStock(w http.ResponseWriter, r *http.Request) {
 	// Sanitize and validate inputs
 	stockReq.Symbol = sanitizeString(stockReq.Symbol)
 
-	if err := validateSymbol(stockReq.Symbol); err != nil {
+	var err error
+	stockReq.Symbol, err = validateSymbol(stockReq.Symbol)
+	if err != nil {
 		log.Printf("PostStock: symbol validation failed: %v", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
@@ -426,7 +432,9 @@ func (h *StockHandler) DeleteStockBySymbol(w http.ResponseWriter, r *http.Reques
 
 	// Validate symbol
 	stockReq.Symbol = sanitizeString(stockReq.Symbol)
-	if err := validateSymbol(stockReq.Symbol); err != nil {
+	var err error
+	stockReq.Symbol, err = validateSymbol(stockReq.Symbol)
+	if err != nil {
 		log.Printf("DeleteStockBySymbol: validation error: %v", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
@@ -435,7 +443,7 @@ func (h *StockHandler) DeleteStockBySymbol(w http.ResponseWriter, r *http.Reques
 	log.Printf("DeleteStockBySymbol: deleting stocks with symbol %s", stockReq.Symbol)
 
 	// Attempt deletion
-	err := h.stocks.DeleteStockBySymbol(stockReq.Symbol)
+	err = h.stocks.DeleteStockBySymbol(stockReq.Symbol)
 	if err != nil {
 		log.Printf("DeleteStockBySymbol: database error: %v", err)
 		if strings.Contains(err.Error(), "not found") {
@@ -474,7 +482,9 @@ func (h *StockHandler) GetStockHistoricalDataDaily(w http.ResponseWriter, r *htt
 	symbol := sanitizeString(r.URL.Query().Get("symbol"))
 
 	// Validate symbol
-	if err := validateSymbol(symbol); err != nil {
+	var err error
+	symbol, err = validateSymbol(symbol)
+	if err != nil {
 		log.Printf("GetStockHistoricalDataDaily: symbol validation error: %v", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
