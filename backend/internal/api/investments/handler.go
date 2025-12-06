@@ -167,7 +167,7 @@ func (Ih *InvestmentsHandler) SellStock(w http.ResponseWriter, r *http.Request) 
 	//userStock.Quantity -= sellStockRequest.Quantity
 	userStock.Quantity = sellStockRequest.Quantity // Pass the sell quantity, let the store handle subtraction
 	userStock.CurrentStockPrice = price
-	userStock.Total = price * float64(userStock.Quantity)
+	userStock.Total = userStock.AvgPrice * float64(userStock.Quantity)
 	err = Ih.UserStockStore.UpdateUserStockWithSell(userStock)
 	if err != nil {
 		log.Printf("Error updating user stock in mongodb collection: %v", err)
