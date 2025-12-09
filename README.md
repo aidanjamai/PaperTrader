@@ -90,6 +90,11 @@ The system uses a simplified user model with the following fields:
 
    The React app will open in your browser at `http://localhost:3000`
 
+Local development : docker compose -f docker-compose.dev.yml up --build
+
+VM: sudo docker compose up -d
+
+
 ## API Endpoints
 
 ### Authentication
