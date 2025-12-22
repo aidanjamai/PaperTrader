@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiRequest } from '../utils/api';
 
 function Trade({ user }) {
     const [tradeType, setTradeType] = useState('buy'); // 'buy' or 'sell'
@@ -29,43 +30,33 @@ function Trade({ user }) {
         }
 
         try {
-            // Get user ID from localStorage
-            const storedUser = localStorage.getItem('user');
-            let userId;
+            // Use apiRequest to ensure auth headers are included
+            const endpoint = tradeType === 'buy' ? '/investments/buy' : '/investments/sell';
             
-            if (user && user.id) {
-                userId = user.id;
-            } else if (storedUser) {
-                const parsedUser = JSON.parse(storedUser);
-                userId = parsedUser.id;
-            } else {
-                setError('User not found. Please log in again.');
-                setLoading(false);
-                return;
-            }
-
-            const endpoint = tradeType === 'buy' ? '/api/investments/buy' : '/api/investments/sell';
-            
-            const response = await fetch(endpoint, {
+            const response = await apiRequest(endpoint, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
                 body: JSON.stringify({
-                    userId: userId,
                     symbol: symbol.toUpperCase().trim(),
                     quantity: quantityNum
+                    // userId is handled by backend from token
                 })
             });
 
             if (response.ok) {
-                const result = await response.json();
+                await response.json(); // Response processed, result not needed
                 setMessage(`${tradeType === 'buy' ? 'Bought' : 'Sold'} ${quantityNum} shares of ${symbol.toUpperCase()} successfully!`);
                 setSymbol('');
                 setQuantity('');
+                // Optional: Trigger a refresh of user balance/portfolio here if we had a global context
             } else {
                 const errorData = await response.text();
-                setError(errorData || `${tradeType === 'buy' ? 'Buy' : 'Sell'} failed`);
+                // Try to parse JSON error if possible
+                try {
+                    const jsonError = JSON.parse(errorData);
+                    setError(jsonError.message || errorData);
+                } catch {
+                    setError(errorData || `${tradeType === 'buy' ? 'Buy' : 'Sell'} failed`);
+                }
             }
         } catch (error) {
             setError('Network error. Please try again.');

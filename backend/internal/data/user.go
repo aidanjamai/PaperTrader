@@ -4,13 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
 )
 
 type User struct {
@@ -22,21 +20,21 @@ type User struct {
 }
 
 type UserStore struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewUserStore(db *sql.DB) *UserStore {
+func NewUserStore(db DBTX) *UserStore {
 	return &UserStore{db: db}
 }
 
 func (us *UserStore) Init() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		email TEXT UNIQUE NOT NULL,
+		id VARCHAR(255) PRIMARY KEY,
+		email VARCHAR(255) UNIQUE NOT NULL,
 		password TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		balance REAL DEFAULT 10000.00
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		balance NUMERIC(15,2) DEFAULT 10000.00
 	);`
 
 	_, err := us.db.Exec(query)
@@ -44,39 +42,29 @@ func (us *UserStore) Init() error {
 }
 
 func (us *UserStore) CreateUser(email, password string) (*User, error) {
-	// Generate random UUID
 	userID := uuid.New().String()
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	// Hash password with higher cost
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
-		fmt.Println("Error hashing password:", err)
-		return nil, err
+		return nil, fmt.Errorf("error hashing password: %w", err)
 	}
 	email = normalizeEmail(email)
 
 	query := `
 	INSERT INTO users (id, email, password, created_at, balance)
-	VALUES (?, ?, ?, CURRENT_TIMESTAMP, 10000.00)`
+	VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 10000.00)`
 
 	_, err = us.db.Exec(query, userID, email, string(hashedPassword))
 	if err != nil {
-		fmt.Println("Error creating user:", err)
-		return nil, err
+		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	// Now fetch the created user
-	user, err := us.GetUserByID(userID)
-	if err != nil {
-		fmt.Println("Error fetching created user:", err)
-		return nil, err
-	}
-
-	return user, nil
+	return us.GetUserByID(userID)
 }
 
 func (us *UserStore) GetUserByEmail(email string) (*User, error) {
-	query := `SELECT id, email, password, created_at, balance FROM users WHERE email = ?`
+	query := `SELECT id, email, password, created_at, balance FROM users WHERE email = $1`
 
 	var user User
 	email = normalizeEmail(email)
@@ -96,7 +84,7 @@ func (us *UserStore) GetUserByEmail(email string) (*User, error) {
 }
 
 func (us *UserStore) GetUserByID(id string) (*User, error) {
-	query := `SELECT id, email, password, created_at, balance FROM users WHERE id = ?`
+	query := `SELECT id, email, password, created_at, balance FROM users WHERE id = $1`
 
 	var user User
 	err := us.db.QueryRow(query, id).Scan(
@@ -115,15 +103,15 @@ func (us *UserStore) GetUserByID(id string) (*User, error) {
 }
 
 func (us *UserStore) GetAllUsers() ([]User, error) {
-	log.Println("Getting all users")
 	query := `SELECT id, email, password, created_at, balance FROM users`
 	var users []User
-	//GETT ALL USERS FROM THE DATABASE
+
 	rows, err := us.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
 	for rows.Next() {
 		var user User
 		err = rows.Scan(
@@ -135,7 +123,6 @@ func (us *UserStore) GetAllUsers() ([]User, error) {
 		users = append(users, user)
 	}
 
-	// Check for errors that occurred during iteration
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
@@ -149,13 +136,13 @@ func (us *UserStore) ValidatePassword(user *User, password string) bool {
 }
 
 func (us *UserStore) UpdateBalance(userID string, newBalance float64) error {
-	query := `UPDATE users SET balance = ? WHERE id = ?`
+	query := `UPDATE users SET balance = $1 WHERE id = $2`
 	_, err := us.db.Exec(query, newBalance, userID)
 	return err
 }
 
 func (us *UserStore) GetBalance(userID string) (float64, error) {
-	query := `SELECT balance FROM users WHERE id = ?`
+	query := `SELECT balance FROM users WHERE id = $1`
 	var balance float64
 	err := us.db.QueryRow(query, userID).Scan(&balance)
 	return balance, err

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
-//import Navbar from './components/Navbar';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -9,12 +8,13 @@ import Home from './components/Home';
 import Trade from './components/Trade';
 import Calculator from './components/Calculator';
 import CompoundInterest from './components/CompoundInterest';
+import { apiRequest } from './utils/api';
 import './App.css';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     checkAuthStatus();
@@ -22,24 +22,31 @@ function App() {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch('/api/auth/check', {
-        credentials: 'include'
-      });
-      const data = await response.json();
+      // The backend route is /api/account/auth
+      const response = await apiRequest('/account/auth');
       
-      if (data.success) {
-        setIsAuthenticated(true);
-        // Fetch user profile
-        const profileResponse = await fetch('/api/auth/profile', {
-          credentials: 'include'
-        });
-        if (profileResponse.ok) {
-          const userData = await profileResponse.json();
-          setUser(userData);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setIsAuthenticated(true);
+          // Fetch user profile
+          const profileResponse = await apiRequest('/account/profile');
+          if (profileResponse.ok) {
+            const userData = await profileResponse.json();
+            setUser(userData);
+          }
+        } else {
+          setIsAuthenticated(false);
+          setUser(null);
         }
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
+      setIsAuthenticated(false);
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -50,9 +57,19 @@ function App() {
     setUser(userData);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setUser(null);
+  const handleLogout = async () => {
+    try {
+      // Call backend to clear cookie
+      await apiRequest('/account/logout', { method: 'POST' });
+    } catch (error) {
+      console.error('Logout failed', error);
+    } finally {
+      // Clear local state regardless of backend success
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setIsAuthenticated(false);
+      setUser(null);
+    }
   };
 
   if (loading) {
@@ -124,4 +141,3 @@ function App() {
 }
 
 export default App;
-

@@ -15,25 +15,27 @@ type Trade struct {
 	Quantity int     `json:"quantity"`
 	Price    float64 `json:"price"`
 	Date     string  `json:"date"`
+	Status   string  `json:"status"` // PENDING, COMPLETED, FAILED
 }
 
 type TradesStore struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewTradesStore(db *sql.DB) *TradesStore {
+func NewTradesStore(db DBTX) *TradesStore {
 	return &TradesStore{db: db}
 }
 
 func (uss *TradesStore) Init() error {
 	query := `CREATE TABLE IF NOT EXISTS trades (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		symbol TEXT NOT NULL,
-		action TEXT NOT NULL,
+		id VARCHAR(255) PRIMARY KEY,
+		user_id VARCHAR(255) NOT NULL,
+		symbol VARCHAR(10) NOT NULL,
+		action VARCHAR(10) NOT NULL,
 		quantity INTEGER NOT NULL,
-		price REAL NOT NULL,
-		date TEXT NOT NULL
+		price NUMERIC(15,2) NOT NULL,
+		date VARCHAR(20) NOT NULL,
+		status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED'
 	);`
 
 	_, err := uss.db.Exec(query)
@@ -42,43 +44,53 @@ func (uss *TradesStore) Init() error {
 
 func (uss *TradesStore) CreateTradeBuy(symbol string, quantity int, price float64, userID string, date string) error {
 	trade := &Trade{
-		ID:       generateTradeID(),
+		ID:       GenerateTradeID(),
 		UserID:   userID,
 		Symbol:   symbol,
 		Action:   "BUY",
 		Quantity: quantity,
 		Price:    price,
 		Date:     date,
+		Status:   "COMPLETED",
 	}
 
 	return uss.CreateTrade(trade)
 }
 
 func (uss *TradesStore) CreateTradeSell(symbol string, quantity int, price float64, userID string, date string) error {
-
 	trade := &Trade{
-		ID:       generateTradeID(),
+		ID:       GenerateTradeID(),
 		UserID:   userID,
 		Symbol:   symbol,
 		Action:   "SELL",
 		Quantity: quantity,
 		Price:    price,
 		Date:     date,
+		Status:   "COMPLETED",
 	}
 	return uss.CreateTrade(trade)
 }
 
 func (uts *TradesStore) CreateTrade(trade *Trade) error {
-	query := `INSERT INTO trades (id, user_id, symbol, action, quantity, price, date) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := uts.db.Exec(query, trade.ID, trade.UserID, trade.Symbol, trade.Action, trade.Quantity, trade.Price, trade.Date)
+	if trade.Status == "" {
+		trade.Status = "COMPLETED"
+	}
+	query := `INSERT INTO trades (id, user_id, symbol, action, quantity, price, date, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := uts.db.Exec(query, trade.ID, trade.UserID, trade.Symbol, trade.Action, trade.Quantity, trade.Price, trade.Date, trade.Status)
+	return err
+}
+
+func (uts *TradesStore) UpdateTradeStatus(id string, status string) error {
+	query := `UPDATE trades SET status = $1 WHERE id = $2`
+	_, err := uts.db.Exec(query, status, id)
 	return err
 }
 
 func (uts *TradesStore) GetTradeByID(id string) (*Trade, error) {
-	query := `SELECT id, user_id, symbol, action, quantity, price, date FROM trades WHERE id = ?`
+	query := `SELECT id, user_id, symbol, action, quantity, price, date, status FROM trades WHERE id = $1`
 
 	var trade Trade
-	err := uts.db.QueryRow(query, id).Scan(&trade.ID, &trade.UserID, &trade.Symbol, &trade.Action, &trade.Quantity, &trade.Price, &trade.Date)
+	err := uts.db.QueryRow(query, id).Scan(&trade.ID, &trade.UserID, &trade.Symbol, &trade.Action, &trade.Quantity, &trade.Price, &trade.Date, &trade.Status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("trade not found")
@@ -89,26 +101,11 @@ func (uts *TradesStore) GetTradeByID(id string) (*Trade, error) {
 	return &trade, err
 }
 
-// func (uts *UserTradesStore) GetAllUserTradesByUserID(userID string) ([]UserTrade, error) {
-// 	query := `SELECT id, user_id, symbol, action, quantity, price, date FROM trades WHERE user_id = ?`
-
-// 	var userTrades []Trade
-// 	err := uts.db.QueryRow(query, userID).Scan(&userTrades.ID, &userTrades.UserID, &userTrades.Symbol, &userTrades.Action, &userTrades.Quantity, &userTrades.Price, &userTrades.Date)
-// 	if err != nil {
-// 		if err == sql.ErrNoRows {
-// 			return nil, errors.New("user trades not found")
-// 		}
-// 		return nil, err
-// 	}
-
-// 	return userTrades, nil
-// }
-
 func (uts *TradesStore) GetAllTradesByUserIDAndSymbol(userID string, symbol string) (*Trade, error) {
-	query := `SELECT id, user_id, symbol, action, quantity, price, date FROM trades WHERE user_id = ? AND symbol = ?`
+	query := `SELECT id, user_id, symbol, action, quantity, price, date, status FROM trades WHERE user_id = $1 AND symbol = $2`
 
 	var trade Trade
-	err := uts.db.QueryRow(query, userID, symbol).Scan(&trade.ID, &trade.UserID, &trade.Symbol, &trade.Action, &trade.Quantity, &trade.Price, &trade.Date)
+	err := uts.db.QueryRow(query, userID, symbol).Scan(&trade.ID, &trade.UserID, &trade.Symbol, &trade.Action, &trade.Quantity, &trade.Price, &trade.Date, &trade.Status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("trade not found")
@@ -119,7 +116,7 @@ func (uts *TradesStore) GetAllTradesByUserIDAndSymbol(userID string, symbol stri
 }
 
 func (uts *TradesStore) DeleteTradeByID(id string) error {
-	query := `DELETE FROM trades WHERE id = ?`
+	query := `DELETE FROM trades WHERE id = $1`
 	_, err := uts.db.Exec(query, id)
 	return err
 }
@@ -130,7 +127,6 @@ func (uts *TradesStore) DeleteAllTrades() error {
 	return err
 }
 
-func generateTradeID() string {
-
+func GenerateTradeID() string {
 	return uuid.New().String()
 }

@@ -5,9 +5,9 @@ import { apiRequest } from '../utils/api';
 function Register({ onLogin }) {
   const [formData, setFormData] = useState({
     email: '',
-    password: '',
-    confirmPassword: ''
+    password: ''
   });
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -24,13 +24,13 @@ function Register({ onLogin }) {
     setError('');
 
     // Validation
-    if (formData.password !== formData.confirmPassword) {
+    if (formData.password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
 
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters long');
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
       return;
     }
 
@@ -39,10 +39,7 @@ function Register({ onLogin }) {
     try {
       const response = await apiRequest('/account/register', {
         method: 'POST',
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password
-        })
+        body: JSON.stringify(formData)
       });
 
       const data = await response.json();
@@ -100,7 +97,7 @@ function Register({ onLogin }) {
               onChange={handleChange}
               required
               disabled={loading}
-              minLength="6"
+              minLength="8"
             />
           </div>
 
@@ -111,11 +108,11 @@ function Register({ onLogin }) {
               id="confirmPassword"
               name="confirmPassword"
               className="form-control"
-              value={formData.confirmPassword}
-              onChange={handleChange}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               required
               disabled={loading}
-              minLength="6"
+              minLength="8"
             />
           </div>
 

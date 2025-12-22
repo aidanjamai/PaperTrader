@@ -20,14 +20,14 @@ services:
     restart: always
     environment:
       - PORT=8080
-      - MONGODB_URI=${MONGODB_URI}
-      - MONGODB_DATABASE=PaperTrader
-      - DATABASE_PATH=/root/papertrader.db
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
-    volumes:
-      - ./backend/papertrader.db:/root/papertrader.db
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DB=0
     depends_on:
-      mongodb:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
@@ -36,19 +36,40 @@ services:
     environment:
       - REACT_APP_API_URL=${REACT_APP_API_URL:-/api} # Pass to container OS env
 
-  mongodb:
-    image: mongo:latest
+  postgres:
+    image: postgres:15-alpine
     restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=papertrader
     volumes:
-      - mongodb_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
 volumes:
-  mongodb_data:
+  postgres_data:
+  redis_data:
   caddy_data:
   caddy_config:

@@ -2,19 +2,17 @@ package account
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
-	"papertrader/internal/api/auth"
-	"papertrader/internal/data"
+	"papertrader/internal/service"
+	"time"
 )
 
 type AccountHandler struct {
-	Users       data.Users
-	AuthService *auth.AuthService
+	AuthService *service.AuthService
 }
 
-func NewAccountHandler(users data.Users, authService *auth.AuthService) *AccountHandler {
-	return &AccountHandler{Users: users, AuthService: authService}
+func NewAccountHandler(authService *service.AuthService) *AccountHandler {
+	return &AccountHandler{AuthService: authService}
 }
 
 // Helper methods
@@ -22,9 +20,7 @@ func (h *AccountHandler) validateAuthRequest(email, password string) error {
 	if email == "" || password == "" {
 		return &ValidationError{Message: "Email and password are required"}
 	}
-	if len(password) < 6 {
-		return &ValidationError{Message: "Password must be at least 6 characters"}
-	}
+	// Service also validates, but early fail is good.
 	return nil
 }
 
@@ -40,6 +36,32 @@ func (h *AccountHandler) writeErrorResponse(w http.ResponseWriter, statusCode in
 		Message: message,
 	}
 	h.writeJSONResponse(w, statusCode, response)
+}
+
+func (h *AccountHandler) setTokenCookie(w http.ResponseWriter, token string) {
+	cookie := &http.Cookie{
+		Name:     "token",
+		Value:    token,
+		Expires:  time.Now().Add(24 * time.Hour),
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+}
+
+func (h *AccountHandler) clearTokenCookie(w http.ResponseWriter) {
+	cookie := &http.Cookie{
+		Name:     "token",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
 }
 
 // Custom error type
@@ -67,15 +89,17 @@ func (h *AccountHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user, token, err := h.AuthService.Register(req.Email, req.Password)
 	if err != nil {
 		switch err.(type) {
-		case *auth.EmailExistsError:
+		case *service.EmailExistsError:
 			h.writeErrorResponse(w, http.StatusBadRequest, "Email already exists")
-		case *auth.TokenGenerationError:
+		case *service.TokenGenerationError:
 			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
 		default:
-			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create user")
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create user: "+err.Error())
 		}
 		return
 	}
+
+	h.setTokenCookie(w, token)
 
 	response := AuthResponse{
 		Success: true,
@@ -101,15 +125,17 @@ func (h *AccountHandler) Login(w http.ResponseWriter, r *http.Request) {
 	user, token, err := h.AuthService.Login(req.Email, req.Password)
 	if err != nil {
 		switch err.(type) {
-		case *auth.InvalidCredentialsError:
+		case *service.InvalidCredentialsError:
 			h.writeErrorResponse(w, http.StatusUnauthorized, "Invalid credentials")
-		case *auth.TokenGenerationError:
+		case *service.TokenGenerationError:
 			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
 		default:
-			h.writeErrorResponse(w, http.StatusInternalServerError, "Login failed")
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Login failed: "+err.Error())
 		}
 		return
 	}
+
+	h.setTokenCookie(w, token)
 
 	response := AuthResponse{
 		Success: true,
@@ -121,6 +147,7 @@ func (h *AccountHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccountHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	h.clearTokenCookie(w)
 	response := AuthResponse{
 		Success: true,
 		Message: "Logout successful",
@@ -135,7 +162,7 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.Users.GetUserByID(userID)
+	user, err := h.AuthService.GetUserByID(userID)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
 		return
@@ -155,7 +182,7 @@ func (h *AccountHandler) IsAuthenticated(w http.ResponseWriter, r *http.Request)
 
 func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
-	user, err := h.Users.GetUserByID(userID)
+	user, err := h.AuthService.GetUserByID(userID)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
 		return
@@ -171,7 +198,14 @@ func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.Users.UpdateBalance(req.UserID, req.Balance)
+	// Override userID from the authenticated context
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		h.writeErrorResponse(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	err := h.AuthService.UpdateBalance(userID, req.Balance)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update balance")
 		return
@@ -180,8 +214,8 @@ func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccountHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.Users.GetAllUsers()
-	log.Println("Users:", users)
+	// Optional: Add admin check here if needed
+	users, err := h.AuthService.GetAllUsers()
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get all users")
 		return

@@ -1,25 +1,23 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"log"
 	"net/http"
 	"os"
 
 	"papertrader/internal/api/account"
-	"papertrader/internal/api/auth"
 	"papertrader/internal/api/investments"
 	"papertrader/internal/api/market"
 	"papertrader/internal/api/middleware"
 	"papertrader/internal/config"
 	"papertrader/internal/data"
-	"papertrader/internal/data/collections"
+	"papertrader/internal/service"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
-	"go.mongodb.org/mongo-driver/mongo"
-	_ "modernc.org/sqlite"
+	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -29,26 +27,22 @@ func main() {
 	}
 
 	cfg := config.Load()
-	router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler := initialize(cfg)
+	router, accountHandler, marketHandler, db, redisClient, investmentsHandler, jwtService, rateLimiter := initialize(cfg)
 	defer db.Close()
-	defer mongoDBClient.Disconnect(context.Background())
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
 
-	// CORS middleware
-	router.Use(middleware.CORS())
+	// CORS middleware with configured origin
+	router.Use(middleware.CORS(cfg.FrontendURL))
 
 	// API routes
 	apiRouter := router.PathPrefix("/api").Subrouter()
-	apiRouter.PathPrefix("/account").Handler(account.Routes(accountHandler))
-	apiRouter.PathPrefix("/market").Handler(market.Routes(marketHandler))
-	apiRouter.PathPrefix("/investments").Handler(investments.Routes(investmentsHandler))
 
-	// Debug: Print all routes
-	// router.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
-	// 	template, _ := route.GetPathTemplate()
-	// 	methods, _ := route.GetMethods()
-	// 	log.Printf("Route: %s, Methods: %v", template, methods)
-	// 	return nil
-	// })
+	// Pass jwtService and rateLimiter to Routes functions
+	apiRouter.PathPrefix("/account").Handler(account.Routes(accountHandler, jwtService))
+	apiRouter.PathPrefix("/market").Handler(market.Routes(marketHandler, jwtService, rateLimiter))
+	apiRouter.PathPrefix("/investments").Handler(investments.Routes(investmentsHandler, jwtService))
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
@@ -60,23 +54,30 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *mongo.Client, *investments.InvestmentsHandler) {
-	// Initialize database
-	db, err := sql.Open("sqlite", cfg.DatabasePath)
+func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *redis.Client, *investments.InvestmentsHandler, *service.JWTService, service.RateLimiter) {
+	// Initialize PostgreSQL database
+	db, err := config.ConnectPostgreSQL(cfg)
 	if err != nil {
-		log.Fatal("Failed to open database:", err)
+		log.Fatal("Failed to connect to PostgreSQL:", err)
 	}
 
-	// Test database connection
-	if err := db.Ping(); err != nil {
-		log.Fatal("Failed to ping database:", err)
+	// Initialize Redis
+	redisClient, err := config.ConnectRedis(cfg)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to Redis: %v. Cache and rate limiting features will be unavailable.", err)
+		redisClient = nil
 	}
 
-	// Initialize MongoDB
-	mongoDBConfig := config.NewMongoDBConfig()
-	mongoDBClient, err := config.ConnectMongoDB(mongoDBConfig)
-	if err != nil {
-		log.Fatal("Failed to connect to MongoDB:", err)
+	// Initialize cache services (nil if Redis unavailable)
+	var stockCache service.StockCache
+	var historicalCache service.HistoricalCache
+	var rateLimiter service.RateLimiter
+
+	if redisClient != nil {
+		stockCache = service.NewRedisStockCache(redisClient)
+		historicalCache = service.NewRedisHistoricalCache(redisClient)
+		rateLimiter = service.NewRedisRateLimiter(redisClient)
+		log.Println("Redis cache and rate limiting services initialized")
 	}
 
 	// Initialize user store
@@ -85,47 +86,39 @@ func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *mark
 		log.Fatal("Failed to initialize user store:", err)
 	}
 
-	// Initialize stock store and handler
-	stockStore := data.NewStockStore(db)
-	if err := stockStore.Init(); err != nil {
-		log.Fatal("Failed to initialize stock store:", err)
-	}
-
 	// Initialize trade store
 	tradeStore := data.NewTradesStore(db)
 	if err := tradeStore.Init(); err != nil {
 		log.Fatal("Failed to initialize trade store:", err)
 	}
 
-	// Initialize user stock store
-	userStockStore := collections.NewUserStockMongoStore(mongoDBClient, mongoDBConfig)
-	if err := userStockStore.Init(); err != nil {
-		log.Fatal("Failed to initialize user stock store:", err)
+	// Initialize portfolio store
+	portfolioStore := data.NewPortfolioStore(db)
+	if err := portfolioStore.Init(); err != nil {
+		log.Fatal("Failed to initialize portfolio store:", err)
 	}
 
-	// Initialize intra daily store
-	intraDailyStore := collections.NewIntraDailyMongoStore(mongoDBClient, mongoDBConfig)
-	if err := intraDailyStore.Init(); err != nil {
-		log.Fatal("Failed to initialize intra daily store:", err)
-	}
-
-	// Initialize JWT service
-	jwtService := auth.NewJWTService("your-secret-key-here")
+	// Initialize JWT service with secret from config
+	jwtService := service.NewJWTService(cfg.JWTSecret)
 
 	// Initialize auth service
-	authService := auth.NewAuthService(userStore, jwtService)
+	authService := service.NewAuthService(userStore, jwtService)
 
 	// Initialize account handler
-	accountHandler := account.NewAccountHandler(userStore, authService)
+	accountHandler := account.NewAccountHandler(authService)
 
+	// Initialize market service with cache services
+	marketService := service.NewMarketService(cfg.MarketStackKey, stockCache, historicalCache)
 	// Initialize market handler
-	marketHandler := market.NewStockHandler(stockStore, intraDailyStore)
+	marketHandler := market.NewStockHandler(marketService)
 
+	// Initialize investment service (uses MarketService for stock prices and PortfolioStore for holdings)
+	investmentService := service.NewInvestmentService(db, marketService, portfolioStore)
 	// Initialize investments handler
-	investmentsHandler := investments.NewInvestmentsHandler(tradeStore, stockStore, userStore, userStockStore)
+	investmentsHandler := investments.NewInvestmentsHandler(investmentService)
 
 	// Setup router
 	router := mux.NewRouter()
 
-	return router, accountHandler, marketHandler, db, mongoDBClient, investmentsHandler
+	return router, accountHandler, marketHandler, db, redisClient, investmentsHandler, jwtService, rateLimiter
 }
