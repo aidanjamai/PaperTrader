@@ -7,48 +7,83 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    networks:
+      - app-network
     environment:
       - PORT=8080
-      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017}
-      - MONGODB_DATABASE=PaperTrader
-      - DATABASE_PATH=/root/papertrader.db
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
+      - GODEBUG=netdns=go  # Force pure Go DNS resolver
+      - JWT_SECRET=dev-secret-key-change-this-in-prod-12345
+      - FRONTEND_URL=http://localhost:3000
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DB=0
     volumes:
       - ./backend:/app  # Hot reload for code (if using Air)
-      - ./backend/papertrader.db:/root/papertrader.db
     depends_on:
-      mongodb:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    # Overwrite the production entrypoint to run dev server
-    entrypoint: ["npm", "start"]
+    image: node:18-alpine
+    working_dir: /app
+    networks:
+      - app-network
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8080
+      # Use relative path so requests go to frontend proxy, which forwards to backend container
+      - REACT_APP_API_URL=/api
+      # Enable polling for hot reload on Windows file systems
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
     volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm start"
     stdin_open: true
     tty: true
 
-  mongodb:
-    image: mongo:latest
+  postgres:
+    image: postgres:15-alpine
+    networks:
+      - app-network
     ports:
-      - "27017:27017"
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=papertrader
     volumes:
-      - mongodb_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - app-network
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
-  mongodb_data:
-
+  postgres_data:
+  redis_data:

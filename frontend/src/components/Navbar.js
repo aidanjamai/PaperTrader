@@ -4,17 +4,9 @@ import { Link, useNavigate } from 'react-router-dom';
 function Navbar({ isAuthenticated, user, onLogout }) {
   const navigate = useNavigate();
 
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include'
-      });
-      onLogout();
-      navigate('/');
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
+  const handleLogoutClick = async () => {
+    await onLogout();
+    navigate('/');
   };
 
   return (
@@ -36,9 +28,9 @@ function Navbar({ isAuthenticated, user, onLogout }) {
                 <Link to="/calculator">Calculator</Link>
                 <Link to="/compound-interest">Compound Interest</Link>
                 <button 
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className="btn btn-secondary"
-                  style={{ background: 'transparent', border: 'none', color: '#667eea' }}
+                  style={{ background: 'transparent', border: 'none', color: '#667eea', cursor: 'pointer' }}
                 >
                   Logout
                 </button>

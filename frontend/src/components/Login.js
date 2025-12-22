@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { apiRequest } from '../utils/api';
 
 function Login({ onLogin }) {
   const [formData, setFormData] = useState({
@@ -23,11 +24,8 @@ function Login({ onLogin }) {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/account/login', {
+      const response = await apiRequest('/account/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(formData)
       });
 

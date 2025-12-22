@@ -1,15 +1,15 @@
 {
-    # Global options
-    email your-email@example.com
+    email aidansjamai99@gmail.com
 }
 
 paper-trader.net {
-    # Serve frontend files
-    reverse_proxy / frontend:80
-
-    # Proxy API requests to backend
     handle /api/* {
         reverse_proxy backend:8080
     }
-}
 
+    handle /* {
+        reverse_proxy frontend:80 {
+            header_up Accept-Encoding identity
+        }
+    }
+}

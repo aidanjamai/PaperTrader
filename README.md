@@ -189,6 +189,37 @@ This is a basic authentication system. You can extend it by adding:
 - Real-time market data
 - Balance updates after trades
 
+
+
+
+1. Robust Distributed Transaction Safety
+Problem: Previously, buying a stock involved separate, unconnected operations to SQLite (deducting money) and MongoDB (adding stock). If the server crashed in between, a user could lose money without getting the stock.
+Solution: I implemented a Two-Phase-Like Commit flow in the new InvestmentService:
+SQLite Transaction: Deduct balance and create a PENDING trade record. Commit this transaction (money is "reserved").
+MongoDB Operation: Add the stock to the user's portfolio.
+Finalization: Update the trade record to COMPLETED in SQLite.
+Safety: If MongoDB fails, the trade remains PENDING in the database, allowing for future reconciliation (and the user hasn't "lost" the record of the transaction).
+2. Professional Service Layer Architecture
+Standardization: I moved business logic out of the HTTP handlers (api/) and into a dedicated internal/service layer.
+AuthService: Handles registration, login, and token validation.
+MarketService: Handles stock data fetching, caching, and validation.
+InvestmentService: Handles the complex buy/sell logic and transaction management.
+Benefits: This makes the code testable, reusable, and cleanly separated from the transport layer (HTTP).
+3. Database Transaction Support
+I refactored UserStore, TradeStore, and StockStore to accept a DBTX interface. This allows them to participate in the same database transaction managed by the Service layer, ensuring atomicity for critical operations like "deduct balance + create trade".
+4. Frontend "Real-Data" Integration
+Dashboard: The dashboard now fetches real portfolio data from the backend. It dynamically calculates your:
+Portfolio Value: Based on your actual holdings.
+Total Net Worth: Cash + Investments.
+Holdings Table: Displays a list of stocks you own with live calculations.
+5. Code Cleanup & Precision
+Rounding: Implemented strict 2-decimal rounding for financial calculations to prevent floating-point errors (e.g., $100.00000001).
+Cleanup: Removed redundant code in api/auth and centralized logic in the new services.
+You can now restart your application to see these changes in action. The database schema for trades will automatically migrate to include the new status column.
+
+
+
+
 ## License
 
 This project is open source and available under the MIT License.
