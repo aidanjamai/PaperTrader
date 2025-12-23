@@ -105,7 +105,7 @@ func (s *MarketService) SaveStock(symbol string, price float64) error {
 	// Invalidate Redis cache for this symbol
 	if s.stockCache != nil {
 		s.stockCache.InvalidateStock(symbol)
-	}
+}
 
 	// Update Redis cache with new price
 	if s.stockCache != nil {
@@ -126,7 +126,7 @@ func (s *MarketService) DeleteStockBySymbol(symbol string) error {
 	// Invalidate Redis cache for this symbol (force refresh from API on next request)
 	if s.stockCache != nil {
 		return s.stockCache.InvalidateStock(symbol)
-	}
+}
 	return nil
 }
 

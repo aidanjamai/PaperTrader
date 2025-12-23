@@ -99,6 +99,13 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# Archive files (tarballs, zip files, etc.)
+*.tar
+*.tar.gz
+*.zip
+frontend.tar
+backend.tar
+
 # Go specific
 # Binaries for programs and plugins
 *.exe
