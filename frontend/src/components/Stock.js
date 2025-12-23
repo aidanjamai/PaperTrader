@@ -1,1 +1,0 @@
-from the markets if the user clicks on the specific stock it shows this page which shows more in depth details about the stock and a graph of the stock performance over time.

@@ -1,7 +1,14 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { User } from '../../types';
 
-function Navbar({ isAuthenticated, user, onLogout }) {
+interface NavbarProps {
+  isAuthenticated: boolean;
+  user: User | null;
+  onLogout: () => Promise<void>;
+}
+
+const Navbar: React.FC<NavbarProps> = ({ isAuthenticated, user, onLogout }) => {
   const navigate = useNavigate();
 
   const handleLogoutClick = async () => {
@@ -31,6 +38,7 @@ function Navbar({ isAuthenticated, user, onLogout }) {
                   onClick={handleLogoutClick}
                   className="btn btn-secondary"
                   style={{ background: 'transparent', border: 'none', color: '#667eea', cursor: 'pointer' }}
+                  type="button"
                 >
                   Logout
                 </button>
@@ -50,6 +58,7 @@ function Navbar({ isAuthenticated, user, onLogout }) {
       </div>
     </nav>
   );
-}
+};
 
 export default Navbar;
+

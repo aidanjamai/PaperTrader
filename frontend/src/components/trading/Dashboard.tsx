@@ -1,19 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { apiRequest } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
+import { apiRequest } from '../../services/api';
+import { User, UserStock } from '../../types';
 
-function Dashboard({ user }) {
-  const [stocks, setStocks] = useState([]);
-  const [loading, setLoading] = useState(true);
+interface DashboardProps {
+  user: User;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ user }) => {
+  const [stocks, setStocks] = useState<UserStock[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchPortfolio();
   }, []);
 
-  const fetchPortfolio = async () => {
+  const fetchPortfolio = async (): Promise<void> => {
     try {
-      const response = await apiRequest('/investments');
+      const response = await apiRequest<UserStock[]>('/investments');
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as UserStock[];
         setStocks(data || []);
       } else {
         console.error('Failed to fetch portfolio');
@@ -25,11 +32,15 @@ function Dashboard({ user }) {
     }
   };
 
-  const portfolioValue = stocks.reduce((total, stock) => {
+  const portfolioValue = stocks.reduce((total: number, stock: UserStock) => {
     return total + (stock.quantity * (stock.current_stock_price || 0));
   }, 0);
 
   const totalValue = portfolioValue + (user?.balance || 0);
+
+  const handleStartTrading = () => {
+    navigate('/trade');
+  };
 
   return (
     <div className="dashboard">
@@ -79,7 +90,7 @@ function Dashboard({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((stock) => (
+                {stocks.map((stock: UserStock) => (
                   <tr key={stock.symbol} style={{ borderBottom: '1px solid #eee' }}>
                     <td style={{ padding: '12px' }}><strong>{stock.symbol}</strong></td>
                     <td style={{ padding: '12px' }}>{stock.quantity}</td>
@@ -94,7 +105,7 @@ function Dashboard({ user }) {
         ) : (
           <div style={{ textAlign: 'center', padding: '40px', background: '#f9f9f9', borderRadius: '8px' }}>
             <p style={{ color: '#666', marginBottom: '16px' }}>No positions yet</p>
-            <button className="btn btn-primary" onClick={() => window.location.href='/trade'}>
+            <button className="btn btn-primary" onClick={handleStartTrading}>
               Start Trading
             </button>
           </div>
@@ -102,6 +113,7 @@ function Dashboard({ user }) {
       </div>
     </div>
   );
-}
+};
 
 export default Dashboard;
+
