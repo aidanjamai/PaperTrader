@@ -1,6 +1,7 @@
 package account
 
 import (
+	"net/http"
 	"papertrader/internal/api/auth"
 	"papertrader/internal/service"
 
@@ -9,21 +10,19 @@ import (
 
 func Routes(h *AccountHandler, jwtService *service.JWTService) *mux.Router {
 	r := mux.NewRouter()
+	middleware := auth.JWTMiddleware(jwtService)
 
 	// Public routes
-	r.HandleFunc("/api/account/register", h.Register).Methods("POST")
-	r.HandleFunc("/api/account/login", h.Login).Methods("POST")
+	r.HandleFunc("/register", h.Register).Methods("POST")
+	r.HandleFunc("/login", h.Login).Methods("POST")
 
-	// Protected routes
-	s := r.PathPrefix("/api/account").Subrouter()
-	s.Use(auth.JWTMiddleware(jwtService))
-
-	s.HandleFunc("/logout", h.Logout).Methods("POST")
-	s.HandleFunc("/profile", h.GetProfile).Methods("GET")
-	s.HandleFunc("/auth", h.IsAuthenticated).Methods("GET")
-	s.HandleFunc("/balance", h.GetBalance).Methods("GET")
-	s.HandleFunc("/update-balance", h.UpdateBalance).Methods("POST")
-	s.HandleFunc("/users", h.GetAllUsers).Methods("GET")
+	// Protected routes - wrap handlers with middleware
+	r.Handle("/logout", middleware(http.HandlerFunc(h.Logout))).Methods("POST")
+	r.Handle("/profile", middleware(http.HandlerFunc(h.GetProfile))).Methods("GET")
+	r.Handle("/auth", middleware(http.HandlerFunc(h.IsAuthenticated))).Methods("GET")
+	r.Handle("/balance", middleware(http.HandlerFunc(h.GetBalance))).Methods("GET")
+	r.Handle("/update-balance", middleware(http.HandlerFunc(h.UpdateBalance))).Methods("POST")
+	r.Handle("/users", middleware(http.HandlerFunc(h.GetAllUsers))).Methods("GET")
 
 	return r
 }

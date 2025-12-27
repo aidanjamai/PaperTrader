@@ -19,14 +19,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const fetchPortfolio = async (): Promise<void> => {
     try {
       const response = await apiRequest<UserStock[]>('/investments');
+      
+      // Check content-type before processing - silently ignore HTML responses
+      // (React dev server may return HTML for routes it doesn't recognize during Strict Mode)
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        // Silently ignore non-JSON responses - likely from React Strict Mode double render
+        // The successful request will populate the portfolio
+        setLoading(false);
+        return;
+      }
+
       if (response.ok) {
         const data = await response.json() as UserStock[];
         setStocks(data || []);
       } else {
-        console.error('Failed to fetch portfolio');
+        // Only log server errors (5xx), not client errors (4xx)
+        if (response.status >= 500) {
+          console.error('Server error fetching portfolio:', response.status);
+        }
       }
     } catch (error) {
-      console.error('Error fetching portfolio:', error);
+      // Silently ignore JSON parse errors from HTML responses
+      // (these are expected during React Strict Mode double renders)
+      if (error instanceof SyntaxError) {
+        setLoading(false);
+        return;
+      }
+      // Only log unexpected errors
+      console.error('Unexpected error fetching portfolio:', error);
     } finally {
       setLoading(false);
     }

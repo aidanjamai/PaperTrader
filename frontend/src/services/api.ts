@@ -14,11 +14,12 @@ export interface ApiRequestOptions extends RequestInit {
 /**
  * Type-safe API request function
  * 
- * @template T - The expected response type
+ * @template T - The expected response type (for documentation/type hints)
  * @param endpoint - API endpoint path
  * @param options - Fetch options (method, body, headers, etc.)
  * @returns Promise resolving to the Response object
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const apiRequest = async <T = unknown>(
   endpoint: string,
   options: ApiRequestOptions = {}

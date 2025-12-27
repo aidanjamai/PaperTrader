@@ -19,9 +19,9 @@ func Routes(h *StockHandler, jwtService *service.JWTService, rateLimiter service
 		r.Use(middleware.RateLimitMiddleware(rateLimiter))
 	}
 
-	r.HandleFunc("/api/market/stock", h.GetStock).Methods("GET")
-	r.HandleFunc("/api/market/stock/historical/daily", h.GetStockHistoricalDataDaily).Methods("GET")
-	r.HandleFunc("/api/market/stock", h.PostStock).Methods("POST")
-	r.HandleFunc("/api/market/stock/symbol", h.DeleteStockBySymbol).Methods("DELETE")
+	r.HandleFunc("/stock", h.GetStock).Methods("GET")
+	r.HandleFunc("/stock/historical/daily", h.GetStockHistoricalDataDaily).Methods("GET")
+	r.HandleFunc("/stock", h.PostStock).Methods("POST")
+	r.HandleFunc("/stock/symbol", h.DeleteStockBySymbol).Methods("DELETE")
 	return r
 }

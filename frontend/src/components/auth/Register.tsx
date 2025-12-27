@@ -1,6 +1,6 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { apiRequest, apiRequestJson } from '../../services/api';
+import { apiRequest } from '../../services/api';
 import { User, RegisterRequest, AuthResponse } from '../../types';
 
 interface RegisterProps {

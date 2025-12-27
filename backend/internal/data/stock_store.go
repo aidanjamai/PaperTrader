@@ -26,10 +26,10 @@ func NewStockStore(db DBTX) *StockStore {
 func (ss *StockStore) Init() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS stocks (
-		id TEXT PRIMARY KEY,
-		symbol TEXT NOT NULL,
-		price REAL NOT NULL,
-		date DATETIME NOT NULL
+		id VARCHAR(255) PRIMARY KEY,
+		symbol VARCHAR(10) NOT NULL,
+		price NUMERIC(15,2) NOT NULL,
+		date TIMESTAMP NOT NULL
 	)`
 
 	_, err := ss.db.Exec(query)
@@ -38,14 +38,14 @@ func (ss *StockStore) Init() error {
 
 func (ss *StockStore) CreateStock(stock *Stock) error {
 	query := `
-	INSERT INTO stocks (id, symbol, price, date) VALUES (?, ?, ?, ?)`
+	INSERT INTO stocks (id, symbol, price, date) VALUES ($1, $2, $3, $4)`
 
 	_, err := ss.db.Exec(query, stock.ID, stock.Symbol, stock.Price, stock.Date)
 	return err
 }
 
 func (ss *StockStore) GetStockByID(id string) (*Stock, error) {
-	query := `SELECT id, symbol, price, date FROM stocks WHERE id = ?`
+	query := `SELECT id, symbol, price, date FROM stocks WHERE id = $1`
 
 	var stock Stock
 	err := ss.db.QueryRow(query, id).Scan(&stock.ID, &stock.Symbol, &stock.Price, &stock.Date)
@@ -61,7 +61,7 @@ func (ss *StockStore) GetStockByID(id string) (*Stock, error) {
 }
 
 func (ss *StockStore) GetStockBySymbol(symbol string) (*Stock, error) {
-	query := `SELECT id, symbol, price, date FROM stocks WHERE symbol = ?`
+	query := `SELECT id, symbol, price, date FROM stocks WHERE symbol = $1`
 
 	var stock Stock
 	err := ss.db.QueryRow(query, symbol).Scan(&stock.ID, &stock.Symbol, &stock.Price, &stock.Date)
@@ -77,7 +77,7 @@ func (ss *StockStore) GetStockBySymbol(symbol string) (*Stock, error) {
 }
 
 func (ss *StockStore) GetStockBySymbolAndDate(symbol string, date string) (*Stock, error) {
-	query := `SELECT id, symbol, price, date FROM stocks WHERE symbol = ? AND date = ?`
+	query := `SELECT id, symbol, price, date FROM stocks WHERE symbol = $1 AND date = $2`
 
 	var stock Stock
 	err := ss.db.QueryRow(query, symbol, date).Scan(&stock.ID, &stock.Symbol, &stock.Price, &stock.Date)
@@ -95,7 +95,7 @@ func (ss *StockStore) GetStockBySymbolAndDate(symbol string, date string) (*Stoc
 }
 
 func (ss *StockStore) UpdateStockBySymbol(symbol string, newPrice float64, newDate string) error {
-	query := `UPDATE stocks SET price = ?, date = ? WHERE symbol = ?`
+	query := `UPDATE stocks SET price = $1, date = $2 WHERE symbol = $3`
 
 	result, err := ss.db.Exec(query, newPrice, newDate, symbol)
 	if err != nil {
@@ -172,7 +172,7 @@ func (ss *StockStore) DeleteStockById(id string) error {
 		return errors.New("stock ID is required")
 	}
 
-	query := `DELETE FROM stocks WHERE id = ?`
+	query := `DELETE FROM stocks WHERE id = $1`
 	result, err := ss.db.Exec(query, id)
 	if err != nil {
 		log.Printf("[StockStore] Error deleting stock by ID: %v", err)
@@ -197,7 +197,7 @@ func (ss *StockStore) DeleteStockBySymbol(symbol string) error {
 		return errors.New("stock symbol is required")
 	}
 
-	query := `DELETE FROM stocks WHERE symbol = ?`
+	query := `DELETE FROM stocks WHERE symbol = $1`
 	result, err := ss.db.Exec(query, symbol)
 	if err != nil {
 		log.Printf("[StockStore] Error deleting stock by symbol: %v", err)

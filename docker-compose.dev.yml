@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -36,13 +34,15 @@ services:
     environment:
       # Use relative path so requests go to frontend proxy, which forwards to backend container
       - REACT_APP_API_URL=/api
+      # Backend URL for proxy configuration (used by setupProxy.ts)
+      - BACKEND_URL=http://backend:8080
       # Enable polling for hot reload on Windows file systems
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    command: sh -c "npm install && npm start"
+    command: sh -c "npm install --legacy-peer-deps && npm start"
     stdin_open: true
     tty: true
 

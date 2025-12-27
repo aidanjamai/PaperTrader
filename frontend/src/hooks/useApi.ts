@@ -4,7 +4,7 @@
  * Provides a reusable hook for API calls with loading and error states
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiRequest, apiRequestJson } from '../services/api';
 
 interface UseApiReturn<T> {
@@ -68,10 +68,16 @@ export const useApi = <T = unknown>(
     setLoading(false);
   }, []);
 
+  // Store execute function in ref to avoid re-triggering useEffect
+  const executeRef = useRef(execute);
+  executeRef.current = execute;
+
   // Auto-execute if configured
-  if (autoExecute) {
-    execute();
-  }
+  useEffect(() => {
+    if (autoExecute) {
+      executeRef.current();
+    }
+  }, [autoExecute]);
 
   return {
     data,
@@ -81,4 +87,5 @@ export const useApi = <T = unknown>(
     reset,
   };
 };
+
 
