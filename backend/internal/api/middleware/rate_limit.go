@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -24,7 +25,8 @@ func RateLimitMiddleware(limiter service.RateLimiter) func(http.Handler) http.Ha
 			result, err := limiter.CheckLimit(userID, ipAddress)
 			if err != nil {
 				// Log error but allow request (fail open)
-				http.Error(w, "Rate limit check failed", http.StatusInternalServerError)
+				log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v", userID, ipAddress, err)
+				next.ServeHTTP(w, r)
 				return
 			}
 
@@ -76,4 +78,3 @@ func getIPAddress(r *http.Request) string {
 
 	return ip
 }
-

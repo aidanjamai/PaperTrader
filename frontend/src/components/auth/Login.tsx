@@ -1,6 +1,6 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { apiRequest, apiRequestJson } from '../../services/api';
+import { apiRequest } from '../../services/api';
 import { User, LoginRequest, AuthResponse } from '../../types';
 
 interface LoginProps {
@@ -46,7 +46,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         setError(data.message || 'Login failed');
       }
     } catch (error) {
-      setError('Network error. Please try again.');
+      console.error('Login error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Network error. Please try again.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

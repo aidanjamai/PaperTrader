@@ -36,13 +36,26 @@ func main() {
 	// CORS middleware with configured origin
 	router.Use(middleware.CORS(cfg.FrontendURL))
 
+	// Health check route for testing
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
+
 	// API routes
 	apiRouter := router.PathPrefix("/api").Subrouter()
 
-	// Pass jwtService and rateLimiter to Routes functions
-	apiRouter.PathPrefix("/account").Handler(account.Routes(accountHandler, jwtService))
-	apiRouter.PathPrefix("/market").Handler(market.Routes(marketHandler, jwtService, rateLimiter))
-	apiRouter.PathPrefix("/investments").Handler(investments.Routes(investmentsHandler, jwtService))
+	// Mount routers - use http.StripPrefix to remove /api/account before passing to router
+	// So /api/account/login becomes /login in the account router
+	apiRouter.PathPrefix("/account").Handler(http.StripPrefix("/api/account", account.Routes(accountHandler, jwtService)))
+	apiRouter.PathPrefix("/market").Handler(http.StripPrefix("/api/market", market.Routes(marketHandler, jwtService, rateLimiter)))
+	apiRouter.PathPrefix("/investments").Handler(http.StripPrefix("/api/investments", investments.Routes(investmentsHandler, jwtService)))
+	
+	// Debug: Test route to verify API routing
+	apiRouter.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("API routing works"))
+	}).Methods("GET")
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
