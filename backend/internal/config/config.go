@@ -56,11 +56,27 @@ func Load() *Config {
 			panic("DATABASE_URL is required in production")
 		}
 		
-		// Warn if database SSL is not enabled (but don't fail - allow override for local testing)
-		if !strings.Contains(cfg.DatabaseURL, "sslmode=require") && 
-		   !strings.Contains(cfg.DatabaseURL, "sslmode=verify-full") &&
-		   !strings.Contains(cfg.DatabaseURL, "sslmode=prefer") {
-			panic("Database connection must use SSL in production. Add sslmode=require to DATABASE_URL")
+		// Validate database SSL - allow disable for internal Docker connections
+		// Internal Docker services (like 'postgres:5432') don't need SSL as traffic never leaves the host
+		hasSSLMode := strings.Contains(cfg.DatabaseURL, "sslmode=require") || 
+		              strings.Contains(cfg.DatabaseURL, "sslmode=verify-full") ||
+		              strings.Contains(cfg.DatabaseURL, "sslmode=prefer") ||
+		              strings.Contains(cfg.DatabaseURL, "sslmode=disable")
+		
+		// Allow sslmode=disable only for internal Docker connections (hostname is service name, not IP or external domain)
+		isInternalConnection := strings.Contains(cfg.DatabaseURL, "@postgres:") || 
+		                        strings.Contains(cfg.DatabaseURL, "@localhost:") ||
+		                        strings.Contains(cfg.DatabaseURL, "@127.0.0.1:")
+		
+		if !hasSSLMode {
+			panic("Database connection must specify sslmode in production. Add sslmode=require (external) or sslmode=disable (internal Docker)")
+		}
+		
+		// For external connections (not internal Docker), require SSL
+		if !isInternalConnection && 
+		   !strings.Contains(cfg.DatabaseURL, "sslmode=require") && 
+		   !strings.Contains(cfg.DatabaseURL, "sslmode=verify-full") {
+			panic("External database connections must use SSL in production. Add sslmode=require to DATABASE_URL")
 		}
 		
 		// Validate FRONTEND_URL is set and is a valid URL
