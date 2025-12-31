@@ -50,6 +50,8 @@ services:
       - REDIS_DB=0
       - JWT_SECRET=${JWT_SECRET}
       - FRONTEND_URL=${FRONTEND_URL:-https://paper-trader.net}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +89,7 @@ services:
     restart: unless-stopped
     environment:
       - REACT_APP_API_URL=${REACT_APP_API_URL:-/api}
+      - REACT_APP_GOOGLE_CLIENT_ID=${REACT_APP_GOOGLE_CLIENT_ID}
     depends_on:
       backend:
         condition: service_healthy

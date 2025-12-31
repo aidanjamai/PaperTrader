@@ -8,7 +8,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ user }) => {
-  const { stocks, loading, error, fetchPortfolio } = usePortfolio();
+  const { stocks, loading, fetchPortfolio } = usePortfolio();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -72,24 +72,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         <h3 style={{ color: '#333', marginBottom: '16px' }}>Your Holdings</h3>
         {loading ? (
           <p>Loading portfolio...</p>
-        ) : error ? (
-          <div style={{ textAlign: 'center', padding: '40px', background: '#fff3cd', borderRadius: '8px', border: '1px solid #ffc107' }}>
-            <p style={{ color: '#856404', marginBottom: '16px', fontWeight: '600' }}>Error Loading Portfolio</p>
-            <p style={{ color: '#856404', marginBottom: '20px' }}>{error}</p>
-            <button 
-              className="btn btn-primary" 
-              onClick={fetchPortfolio}
-              style={{ marginRight: '10px' }}
-            >
-              Retry
-            </button>
-            <button 
-              className="btn btn-secondary" 
-              onClick={handleStartTrading}
-            >
-              Start Trading
-            </button>
-          </div>
         ) : stocks.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>

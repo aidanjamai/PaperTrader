@@ -20,10 +20,16 @@ func Routes(h *AccountHandler, jwtService *service.JWTService, rateLimiter servi
 		// Public routes with rate limiting
 		r.Handle("/register", rateLimitMiddleware(http.HandlerFunc(h.Register))).Methods("POST")
 		r.Handle("/login", rateLimitMiddleware(http.HandlerFunc(h.Login))).Methods("POST")
+		r.Handle("/auth/google", rateLimitMiddleware(http.HandlerFunc(h.GoogleLogin))).Methods("POST")
+		r.Handle("/verify-email", rateLimitMiddleware(http.HandlerFunc(h.VerifyEmail))).Methods("GET")
+		r.Handle("/resend-verification", rateLimitMiddleware(http.HandlerFunc(h.ResendVerification))).Methods("POST")
 	} else {
 		// Fallback if rate limiter is unavailable (should not happen in production)
 		r.HandleFunc("/register", h.Register).Methods("POST")
 		r.HandleFunc("/login", h.Login).Methods("POST")
+		r.HandleFunc("/auth/google", h.GoogleLogin).Methods("POST")
+		r.HandleFunc("/verify-email", h.VerifyEmail).Methods("GET")
+		r.HandleFunc("/resend-verification", h.ResendVerification).Methods("POST")
 	}
 
 	// Protected routes - wrap handlers with JWT middleware

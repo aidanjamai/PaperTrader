@@ -17,6 +17,8 @@ type Config struct {
 	RedisPassword  string
 	RedisDB        int
 	Environment    string
+	ResendAPIKey   string
+	FromEmail      string
 }
 
 // IsProduction returns true if the environment is set to "production"
@@ -38,6 +40,8 @@ func Load() *Config {
 		RedisPassword:  getEnv("REDIS_PASSWORD", ""),
 		RedisDB:        getEnvInt("REDIS_DB", 0),
 		Environment:    env,
+		ResendAPIKey:   getEnv("RESEND_API_KEY", ""),
+		FromEmail:      getEnv("FROM_EMAIL", ""),
 	}
 	
 	// Validate required configuration in production

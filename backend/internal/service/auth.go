@@ -1,21 +1,31 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net/mail"
 	"papertrader/internal/data"
 	"papertrader/internal/util"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type AuthService struct {
-	users      *data.UserStore
-	jwtService *JWTService
+	users        *data.UserStore
+	jwtService   *JWTService
+	emailService *EmailService
+	googleOAuth  *GoogleOAuthService
 }
 
-func NewAuthService(users *data.UserStore, jwtService *JWTService) *AuthService {
+func NewAuthService(users *data.UserStore, jwtService *JWTService, emailService *EmailService, googleOAuth *GoogleOAuthService) *AuthService {
 	return &AuthService{
-		users:      users,
-		jwtService: jwtService,
+		users:        users,
+		jwtService:   jwtService,
+		emailService: emailService,
+		googleOAuth:  googleOAuth,
 	}
 }
 
@@ -38,19 +48,112 @@ func (s *AuthService) Register(email, password string) (*data.User, string, erro
 		return nil, "", &EmailExistsError{}
 	}
 
-	// Create user
-	user, err := s.users.CreateUser(email, password)
+	// Create user with verification token
+	user, verificationToken, err := s.users.CreateUserWithVerification(email, password)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Generate JWT token
+	// Send verification email
+	if s.emailService != nil {
+		if err := s.emailService.SendVerificationEmail(user.Email, verificationToken); err != nil {
+			// Log error but don't fail registration
+			log.Printf("Failed to send verification email: %v", err)
+		}
+	}
+
+	// Generate JWT token (user needs to verify email to use it fully)
 	token, err := s.jwtService.GenerateToken(user.ID, user.Email)
 	if err != nil {
 		return nil, "", &TokenGenerationError{}
 	}
 
 	return user, token, nil
+}
+
+// VerifyEmail verifies a user's email using the verification token
+func (s *AuthService) VerifyEmail(token string) error {
+	return s.users.VerifyEmail(token)
+}
+
+// ResendVerificationEmail sends a new verification email to the user
+func (s *AuthService) ResendVerificationEmail(email string) error {
+	user, err := s.users.GetUserByEmail(email)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	if user.EmailVerified {
+		return errors.New("email already verified")
+	}
+
+	// Generate new token
+	newToken := uuid.New().String()
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	err = s.users.UpdateVerificationToken(user.ID, newToken, expiresAt)
+	if err != nil {
+		return err
+	}
+
+	if s.emailService == nil {
+		return errors.New("email service not configured")
+	}
+
+	return s.emailService.SendVerificationEmail(user.Email, newToken)
+}
+
+// LoginWithGoogle handles Google OAuth login
+func (s *AuthService) LoginWithGoogle(idToken string) (*data.User, string, error) {
+	ctx := context.Background()
+
+	// Verify the Google ID token
+	googleUser, err := s.googleOAuth.VerifyIDToken(ctx, idToken)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid Google token: %w", err)
+	}
+
+	// Check if user exists by Google ID
+	user, err := s.users.GetUserByGoogleID(googleUser.ID)
+	if err == nil {
+		// User exists, generate JWT
+		jwtToken, err := s.jwtService.GenerateToken(user.ID, user.Email)
+		if err != nil {
+			return nil, "", &TokenGenerationError{}
+		}
+		return user, jwtToken, nil
+	}
+
+	// Check if email exists (link accounts)
+	existingUser, err := s.users.GetUserByEmail(googleUser.Email)
+	if err == nil {
+		// Link Google account to existing user
+		err = s.users.LinkGoogleAccount(existingUser.ID, googleUser.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		existingUser.GoogleID = &googleUser.ID
+		existingUser.EmailVerified = true
+
+		jwtToken, err := s.jwtService.GenerateToken(existingUser.ID, existingUser.Email)
+		if err != nil {
+			return nil, "", &TokenGenerationError{}
+		}
+		return existingUser, jwtToken, nil
+	}
+
+	// Create new user
+	user, err = s.users.CreateGoogleUser(googleUser.Email, googleUser.ID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	jwtToken, err := s.jwtService.GenerateToken(user.ID, user.Email)
+	if err != nil {
+		return nil, "", &TokenGenerationError{}
+	}
+
+	return user, jwtToken, nil
 }
 
 func (s *AuthService) Login(email, password string) (*data.User, string, error) {

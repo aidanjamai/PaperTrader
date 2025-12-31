@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@react-oauth/google": "^0.13.4",
     "bootstrap": "^5.3.8",
     "react": "^18.2.0",
     "react-bootstrap": "^2.10.10",
@@ -11,6 +12,8 @@
     "react-scripts": "5.0.1"
   },
   "scripts": {
+    "sync-env": "test -f ../scripts/sync-env.js && node ../scripts/sync-env.js || exit 0",
+    "prestart": "npm run sync-env",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",

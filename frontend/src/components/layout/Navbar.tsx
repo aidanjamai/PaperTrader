@@ -29,7 +29,21 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated, user, onLogout }) => {
               <>
                 
                 <Link to="/dashboard">Dashboard</Link>
-                <Link to="/trade">Trade</Link>
+                {user?.email_verified ? (
+                  <Link to="/trade">Trade</Link>
+                ) : (
+                  <span 
+                    style={{ 
+                      color: '#999', 
+                      cursor: 'not-allowed', 
+                      textDecoration: 'none',
+                      opacity: 0.6
+                    }}
+                    title="Please verify your email to trade"
+                  >
+                    Trade
+                  </span>
+                )}
                 <Link to="/markets">Markets</Link>
                 <Link to="/calculator">Calculator</Link>
                 <Link to="/compound-interest">Compound Interest</Link>
