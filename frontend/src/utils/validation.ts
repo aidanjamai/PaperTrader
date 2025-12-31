@@ -75,6 +75,12 @@ export const validatePassword = (password: string, minLength: number = 8): Passw
     errors.push('Password must contain at least one number');
   }
 
+  // Check for special characters (matches backend validation)
+  const specialCharRegex = /[!@#$%^&*()\-_+=[\]{}|\\:;"'<>,.?/~`]/;
+  if (!specialCharRegex.test(password)) {
+    errors.push('Password must contain at least one special character (!@#$%^&*() etc.)');
+  }
+
   return {
     isValid: errors.length === 0,
     errors
