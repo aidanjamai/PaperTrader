@@ -2,9 +2,10 @@
     # Email for Let's Encrypt certificates
     email aidansjamai99@gmail.com
     
-    # Reduce log verbosity for better performance on e2-micro
+    # Minimal logging for production (errors only)
+    # Keep some logging for troubleshooting SSL certificate issues
     log {
-        output discard
+        level ERROR
     }
     
     # Disable admin API for security and resource savings
@@ -34,17 +35,33 @@ paper-trader.net {
         # Referrer policy
         Referrer-Policy "strict-origin-when-cross-origin"
         
+        # Content Security Policy
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.marketstack.com;"
+        
         # Remove server header for security
         -Server
     }
 
+    # API routes - proxy to backend
     handle /api/* {
-        reverse_proxy backend:8080
+        reverse_proxy backend:8080 {
+            # Connection timeouts for backend requests
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 30s
+            }
+        }
     }
 
+    # Frontend routes - proxy to frontend
     handle /* {
         reverse_proxy frontend:80 {
             header_up Accept-Encoding identity
+            # Timeouts for frontend requests
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 30s
+            }
         }
     }
 }
