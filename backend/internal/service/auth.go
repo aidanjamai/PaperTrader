@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/mail"
 	"papertrader/internal/data"
+	"papertrader/internal/util"
 )
 
 type AuthService struct {
@@ -26,9 +27,9 @@ func (s *AuthService) Register(email, password string) (*data.User, string, erro
 		return nil, "", errors.New("invalid email format")
 	}
 
-	// Validate password strength
-	if len(password) < 8 {
-		return nil, "", errors.New("password must be at least 8 characters long")
+	// Validate password strength with complexity requirements
+	if err := validatePasswordStrength(password); err != nil {
+		return nil, "", err
 	}
 
 	// Check if email already exists
@@ -92,10 +93,60 @@ func (s *AuthService) GetUserByID(userID string) (*data.User, error) {
 }
 
 func (s *AuthService) UpdateBalance(userID string, balance float64) error {
+	// Validate balance range
+	if err := util.ValidateBalance(balance); err != nil {
+		return err
+	}
 	return s.users.UpdateBalance(userID, balance)
 }
 
 func (s *AuthService) GetAllUsers() ([]data.User, error) {
 	return s.users.GetAllUsers()
+}
+
+// validatePasswordStrength enforces password complexity requirements
+func validatePasswordStrength(password string) error {
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters long")
+	}
+	
+	hasUpper := false
+	hasLower := false
+	hasNumber := false
+	hasSpecial := false
+	
+	for _, char := range password {
+		switch {
+		case 'A' <= char && char <= 'Z':
+			hasUpper = true
+		case 'a' <= char && char <= 'z':
+			hasLower = true
+		case '0' <= char && char <= '9':
+			hasNumber = true
+		case char == '!' || char == '@' || char == '#' || char == '$' || char == '%' ||
+			 char == '^' || char == '&' || char == '*' || char == '(' || char == ')' ||
+			 char == '-' || char == '_' || char == '+' || char == '=' || char == '[' ||
+			 char == ']' || char == '{' || char == '}' || char == '|' || char == '\\' ||
+			 char == ':' || char == ';' || char == '"' || char == '\'' || char == '<' ||
+			 char == '>' || char == ',' || char == '.' || char == '?' || char == '/' ||
+			 char == '~' || char == '`':
+			hasSpecial = true
+		}
+	}
+	
+	if !hasUpper {
+		return errors.New("password must contain at least one uppercase letter")
+	}
+	if !hasLower {
+		return errors.New("password must contain at least one lowercase letter")
+	}
+	if !hasNumber {
+		return errors.New("password must contain at least one number")
+	}
+	if !hasSpecial {
+		return errors.New("password must contain at least one special character")
+	}
+	
+	return nil
 }
 

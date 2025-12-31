@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"papertrader/internal/api/account"
 	"papertrader/internal/api/investments"
@@ -36,8 +40,43 @@ func main() {
 	// CORS middleware with configured origin
 	router.Use(middleware.CORS(cfg.FrontendURL))
 
-	// Health check route for testing
+	// Request size limit middleware (applied to all routes)
+	maxRequestSize := middleware.GetMaxRequestSize()
+	router.Use(middleware.RequestSizeLimitMiddleware(maxRequestSize))
+
+	// Request timeout middleware (applied to all routes)
+	requestTimeout := middleware.GetRequestTimeout()
+	router.Use(middleware.RequestTimeoutMiddleware(requestTimeout))
+
+	// Request logging middleware (only in development)
+	if !cfg.IsProduction() {
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				log.Printf("[Request] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+				next.ServeHTTP(w, r)
+			})
+		})
+	}
+
+	// Enhanced health check route with dependency checks
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Check database connection
+		if err := db.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("DB_UNHEALTHY"))
+			return
+		}
+		
+		// Check Redis connection if available
+		if redisClient != nil {
+			ctx := r.Context()
+			if err := redisClient.Ping(ctx).Err(); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("REDIS_UNHEALTHY"))
+				return
+			}
+		}
+		
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}).Methods("GET")
@@ -45,17 +84,29 @@ func main() {
 	// API routes
 	apiRouter := router.PathPrefix("/api").Subrouter()
 
+	// Investments routes - must be registered on apiRouter (not main router) since apiRouter handles all /api/* requests
+	investmentsRouter := investments.Routes(investmentsHandler, jwtService)
+	
+	// Register EXACT match for both with and without trailing slash FIRST (before PathPrefix)
+	// This ensures /api/investments matches before PathPrefix can redirect it
+	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
+		// Modify the request path to "/" for the investments router (which expects "/" after StripPrefix)
+		originalPath := r.URL.Path
+		r.URL.Path = "/"
+		r.URL.RawPath = "/"
+		investmentsRouter.ServeHTTP(w, r)
+		// Restore original path (not strictly necessary, but clean)
+		r.URL.Path = originalPath
+	}
+	apiRouter.HandleFunc("/investments", handlerFunc).Methods("GET")
+	apiRouter.HandleFunc("/investments/", handlerFunc).Methods("GET")
+	
 	// Mount routers - use http.StripPrefix to remove /api/account before passing to router
 	// So /api/account/login becomes /login in the account router
-	apiRouter.PathPrefix("/account").Handler(http.StripPrefix("/api/account", account.Routes(accountHandler, jwtService)))
-	apiRouter.PathPrefix("/market").Handler(http.StripPrefix("/api/market", market.Routes(marketHandler, jwtService, rateLimiter)))
-	apiRouter.PathPrefix("/investments").Handler(http.StripPrefix("/api/investments", investments.Routes(investmentsHandler, jwtService)))
-	
-	// Debug: Test route to verify API routing
-	apiRouter.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("API routing works"))
-	}).Methods("GET")
+	apiRouter.PathPrefix("/account").Handler(http.StripPrefix("/api/account", account.Routes(accountHandler, jwtService, rateLimiter, cfg)))
+	apiRouter.PathPrefix("/market").Handler(http.StripPrefix("/api/market", market.Routes(marketHandler, jwtService, rateLimiter, cfg)))
+	// Prefix match for /api/investments/* (for /buy, /sell, etc.) - must come AFTER exact match
+	apiRouter.PathPrefix("/investments/").Handler(http.StripPrefix("/api/investments", investmentsRouter))
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
@@ -63,8 +114,62 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("Server starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, router))
+	// Ensure logs are flushed immediately (no buffering)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetOutput(os.Stdout)
+	
+	log.Printf("Server starting on port %s (environment: %s)", port, cfg.Environment)
+	if cfg.IsProduction() {
+		log.Println("Production mode: Debug logging disabled, security features enabled")
+	}
+
+	// Create HTTP server with proper configuration
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	log.Println("Server started successfully")
+
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	// Create shutdown context with 30 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Shutdown server gracefully
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	// Close database connection
+	if err := db.Close(); err != nil {
+		log.Printf("Error closing database: %v", err)
+	}
+
+	// Close Redis connection
+	if redisClient != nil {
+		if err := redisClient.Close(); err != nil {
+			log.Printf("Error closing Redis: %v", err)
+		}
+	}
+
+	log.Println("Server shutdown complete")
 }
 
 func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *market.StockHandler, *sql.DB, *redis.Client, *investments.InvestmentsHandler, *service.JWTService, service.RateLimiter) {
@@ -118,7 +223,7 @@ func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *mark
 	authService := service.NewAuthService(userStore, jwtService)
 
 	// Initialize account handler
-	accountHandler := account.NewAccountHandler(authService)
+	accountHandler := account.NewAccountHandler(authService, cfg)
 
 	// Initialize market service with cache services
 	marketService := service.NewMarketService(cfg.MarketStackKey, stockCache, historicalCache)
@@ -132,6 +237,8 @@ func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *mark
 
 	// Setup router
 	router := mux.NewRouter()
+	// Disable strict slash to prevent redirects (e.g., /api/investments -> /api/investments/)
+	router.StrictSlash(false)
 
 	return router, accountHandler, marketHandler, db, redisClient, investmentsHandler, jwtService, rateLimiter
 }

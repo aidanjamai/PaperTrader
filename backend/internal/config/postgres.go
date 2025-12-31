@@ -15,10 +15,13 @@ func ConnectPostgreSQL(cfg *Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings
-	db.SetMaxOpenConns(25)
+	// Set connection pool settings optimized for e2-micro instance
+	// Reduced from 25 to 10 to match PostgreSQL max_connections=50
+	// This prevents connection exhaustion on small instances
+	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	// Retry connection similar to MongoDB/Redis pattern
 	for i := 0; i < 5; i++ {

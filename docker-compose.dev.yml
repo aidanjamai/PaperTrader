@@ -2,7 +2,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     ports:
       - "8080:8080"
     networks:
@@ -17,7 +17,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - REDIS_DB=0
     volumes:
-      - ./backend:/app  # Hot reload for code (if using Air)
+      - ./backend:/app  # Mount source code for hot reload
+    working_dir: /app
+    # Dependencies are pre-installed in the image, just run the code
+    command: go run main.go
     depends_on:
       postgres:
         condition: service_healthy

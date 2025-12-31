@@ -3,16 +3,34 @@ package account
 import (
 	"encoding/json"
 	"net/http"
+	"papertrader/internal/config"
 	"papertrader/internal/service"
+	"papertrader/internal/util"
 	"time"
 )
 
 type AccountHandler struct {
 	AuthService *service.AuthService
+	Config      *config.Config
 }
 
-func NewAccountHandler(authService *service.AuthService) *AccountHandler {
-	return &AccountHandler{AuthService: authService}
+func NewAccountHandler(authService *service.AuthService, cfg *config.Config) *AccountHandler {
+	return &AccountHandler{
+		AuthService: authService,
+		Config:      cfg,
+	}
+}
+
+// isSecureConnection determines if the connection is secure (HTTPS)
+// Checks X-Forwarded-Proto header (set by reverse proxy) or environment
+func (h *AccountHandler) isSecureConnection(r *http.Request) bool {
+	// Check X-Forwarded-Proto header (set by Caddy or other reverse proxy)
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+	// In production, assume HTTPS if behind reverse proxy
+	// In development, only use Secure if explicitly HTTPS
+	return h.Config.IsProduction()
 }
 
 // Helper methods
@@ -38,26 +56,28 @@ func (h *AccountHandler) writeErrorResponse(w http.ResponseWriter, statusCode in
 	h.writeJSONResponse(w, statusCode, response)
 }
 
-func (h *AccountHandler) setTokenCookie(w http.ResponseWriter, token string) {
+func (h *AccountHandler) setTokenCookie(w http.ResponseWriter, r *http.Request, token string) {
+	secure := h.isSecureConnection(r)
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    token,
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   secure,
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 	}
 	http.SetCookie(w, cookie)
 }
 
-func (h *AccountHandler) clearTokenCookie(w http.ResponseWriter) {
+func (h *AccountHandler) clearTokenCookie(w http.ResponseWriter, r *http.Request) {
+	secure := h.isSecureConnection(r)
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    "",
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   secure,
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 	}
@@ -94,18 +114,18 @@ func (h *AccountHandler) Register(w http.ResponseWriter, r *http.Request) {
 		case *service.TokenGenerationError:
 			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
 		default:
-			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create user: "+err.Error())
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to create user")
 		}
 		return
 	}
 
-	h.setTokenCookie(w, token)
+	h.setTokenCookie(w, r, token)
 
 	response := AuthResponse{
 		Success: true,
 		Message: "User registered successfully",
 		User:    user,
-		Token:   token,
+		// Token removed from response for security - use cookie only
 	}
 	h.writeJSONResponse(w, http.StatusCreated, response)
 }
@@ -130,24 +150,24 @@ func (h *AccountHandler) Login(w http.ResponseWriter, r *http.Request) {
 		case *service.TokenGenerationError:
 			h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to generate token")
 		default:
-			h.writeErrorResponse(w, http.StatusInternalServerError, "Login failed: "+err.Error())
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Login failed")
 		}
 		return
 	}
 
-	h.setTokenCookie(w, token)
+	h.setTokenCookie(w, r, token)
 
 	response := AuthResponse{
 		Success: true,
 		Message: "Login successful",
 		User:    user,
-		Token:   token,
+		// Token removed from response for security - use cookie only
 	}
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
 func (h *AccountHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	h.clearTokenCookie(w)
+	h.clearTokenCookie(w, r)
 	response := AuthResponse{
 		Success: true,
 		Message: "Logout successful",
@@ -202,6 +222,12 @@ func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
 		h.writeErrorResponse(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	// Validate balance
+	if err := util.ValidateBalance(req.Balance); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

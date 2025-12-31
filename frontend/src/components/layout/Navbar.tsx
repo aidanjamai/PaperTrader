@@ -18,7 +18,7 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated, user, onLogout }) => {
 
   return (
     <nav className="navbar">
-      <div className="container">
+      <div className="navbar-container">
         <div className="navbar-content">
           <Link to="/" className="navbar-brand">
             PaperTrader
@@ -27,11 +27,10 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated, user, onLogout }) => {
           <div className="navbar-nav">
             {isAuthenticated ? (
               <>
-                <span className="welcome-message">
-                  {/* Welcome, {user?.email}! */}
-                </span>
+                
                 <Link to="/dashboard">Dashboard</Link>
                 <Link to="/trade">Trade</Link>
+                <Link to="/markets">Markets</Link>
                 <Link to="/calculator">Calculator</Link>
                 <Link to="/compound-interest">Compound Interest</Link>
                 <button 
