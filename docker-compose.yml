@@ -23,7 +23,7 @@ services:
           cpus: '0.1'
           memory: 32M
     healthcheck:
-      test: ["CMD-SHELL", "echo -ne 'GET / HTTP/1.1\r\nHost: paper-trader.net\r\nConnection: close\r\n\r\n' | nc 127.0.0.1 80 | head -1 | grep -q 'HTTP' || exit 1"]
+      test: ["CMD-SHELL", "printf 'GET / HTTP/1.1\r\nHost: paper-trader.net\r\nConnection: close\r\n\r\n' | nc 127.0.0.1 80 | head -1 | grep -q HTTP || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
