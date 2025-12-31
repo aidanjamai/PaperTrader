@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -8,11 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"papertrader/internal/config"
 	"papertrader/internal/service"
 )
 
 // RateLimitMiddleware creates middleware for rate limiting using the provided rate limiter
-func RateLimitMiddleware(limiter service.RateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter service.RateLimiter, cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract user ID from header (set by JWT middleware if authenticated)
@@ -24,8 +26,21 @@ func RateLimitMiddleware(limiter service.RateLimiter) func(http.Handler) http.Ha
 			// Check rate limits
 			result, err := limiter.CheckLimit(userID, ipAddress)
 			if err != nil {
-				// Log error but allow request (fail open)
-				log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v", userID, ipAddress, err)
+				// In production: fail-closed (deny request if rate limiter unavailable)
+				// In development: fail-open (allow request for easier debugging)
+				if cfg != nil && cfg.IsProduction() {
+					log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v", userID, ipAddress, err)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"success":    false,
+						"message":    "Rate limiting service unavailable",
+						"error_code": "RATE_LIMITER_UNAVAILABLE",
+					})
+					return
+				}
+				// Development: fail-open
+				log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v (allowing request in development)", userID, ipAddress, err)
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -1,4 +1,6 @@
-import React, { useState, ChangeEvent } from 'react';
+import React, { useState, ChangeEvent, useEffect } from 'react';
+import { usePortfolio } from '../../hooks/usePortfolio';
+import { UserStock } from '../../types';
 
 interface StockInput {
   id: number;
@@ -23,10 +25,12 @@ interface PortfolioTotals {
 }
 
 const Calculator: React.FC = () => {
+  const { stocks: portfolioStocks, loading: portfolioLoading, error: portfolioError, fetchPortfolio } = usePortfolio();
   const [stocks, setStocks] = useState<StockInput[]>([
     { id: 1, symbol: '', currentPrice: '', sharesOwned: '', futurePrice: '' }
   ]);
   const [nextId, setNextId] = useState<number>(2);
+  const [portfolioLoaded, setPortfolioLoaded] = useState<boolean>(false);
 
   const addStock = () => {
     setStocks([
@@ -92,6 +96,43 @@ const Calculator: React.FC = () => {
     };
   };
 
+  /**
+   * Converts UserStock from portfolio to StockInput for calculator
+   */
+  const convertPortfolioToCalculator = (portfolioStocks: UserStock[]): StockInput[] => {
+    return portfolioStocks.map((stock, index) => ({
+      id: index + 1,
+      symbol: stock.symbol,
+      currentPrice: stock.current_stock_price > 0 
+        ? stock.current_stock_price.toFixed(2) 
+        : stock.avg_price.toFixed(2), // Fallback to avg_price if current price unavailable
+      sharesOwned: stock.quantity.toString(),
+      futurePrice: '' // User fills this in for projections
+    }));
+  };
+
+  /**
+   * Load portfolio data into calculator
+   */
+  const loadFromPortfolio = async () => {
+    setPortfolioLoaded(false);
+    await fetchPortfolio();
+  };
+
+  /**
+   * Update calculator stocks when portfolio is loaded
+   */
+  useEffect(() => {
+    if (portfolioStocks.length > 0 && !portfolioLoading && !portfolioLoaded) {
+      const convertedStocks = convertPortfolioToCalculator(portfolioStocks);
+      if (convertedStocks.length > 0) {
+        setStocks(convertedStocks);
+        setNextId(convertedStocks.length + 1);
+        setPortfolioLoaded(true);
+      }
+    }
+  }, [portfolioStocks, portfolioLoading, portfolioLoaded]);
+
   const totals = calculateTotals();
 
   return (
@@ -101,6 +142,65 @@ const Calculator: React.FC = () => {
         <p style={{ color: '#666', marginBottom: '20px' }}>
           Calculate potential gains/losses by entering your current holdings and projected future prices.
         </p>
+
+        {/* Portfolio Loading Section */}
+        <div style={{ 
+          marginBottom: '20px', 
+          padding: '15px', 
+          backgroundColor: '#e7f3ff', 
+          borderRadius: '8px',
+          border: '1px solid #b3d9ff'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <strong style={{ color: '#0066cc' }}>Load Your Portfolio</strong>
+              <p style={{ margin: '5px 0 0 0', fontSize: '14px', color: '#666' }}>
+                Import your current holdings to pre-fill the calculator
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadFromPortfolio}
+              className="btn btn-primary"
+              disabled={portfolioLoading}
+              style={{ 
+                minWidth: '150px',
+                opacity: portfolioLoading ? 0.6 : 1,
+                cursor: portfolioLoading ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {portfolioLoading ? 'Loading...' : 'Load from Portfolio'}
+            </button>
+          </div>
+          
+          {portfolioError && (
+            <div style={{ 
+              marginTop: '10px', 
+              padding: '10px', 
+              backgroundColor: '#fff3cd', 
+              borderRadius: '4px',
+              border: '1px solid #ffc107',
+              color: '#856404',
+              fontSize: '14px'
+            }}>
+              {portfolioError}
+            </div>
+          )}
+          
+          {portfolioLoaded && portfolioStocks.length > 0 && (
+            <div style={{ 
+              marginTop: '10px', 
+              padding: '10px', 
+              backgroundColor: '#d4edda', 
+              borderRadius: '4px',
+              border: '1px solid #c3e6cb',
+              color: '#155724',
+              fontSize: '14px'
+            }}>
+              ✓ Loaded {portfolioStocks.length} stock{portfolioStocks.length !== 1 ? 's' : ''} from your portfolio
+            </div>
+          )}
+        </div>
 
         {stocks.map((stock, index) => (
           <div key={stock.id} style={{

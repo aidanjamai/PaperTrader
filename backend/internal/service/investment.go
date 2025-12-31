@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"papertrader/internal/data"
+	"papertrader/internal/util"
 )
 
 type InvestmentService struct {
@@ -31,6 +32,11 @@ func round(val float64) float64 {
 }
 
 func (s *InvestmentService) BuyStock(userID string, symbol string, quantity int) (*data.UserStock, error) {
+	// Validate quantity (defense in depth)
+	if err := util.ValidateQuantity(quantity); err != nil {
+		return nil, err
+	}
+
 	// 1. Get Stock Price from MarketService (Redis-backed)
 	stockData, err := s.marketService.GetStock(symbol)
 	if err != nil {
@@ -115,6 +121,11 @@ func (s *InvestmentService) BuyStock(userID string, symbol string, quantity int)
 }
 
 func (s *InvestmentService) SellStock(userID string, symbol string, quantity int) (*data.UserStock, error) {
+	// Validate quantity (defense in depth)
+	if err := util.ValidateQuantity(quantity); err != nil {
+		return nil, err
+	}
+
 	// 1. Get Stock Price from MarketService (Redis-backed)
 	stockData, err := s.marketService.GetStock(symbol)
 	if err != nil {

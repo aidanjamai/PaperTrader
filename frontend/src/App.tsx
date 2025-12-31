@@ -6,6 +6,7 @@ import Register from './components/auth/Register';
 import Dashboard from './components/trading/Dashboard';
 import Home from './components/common/Home';
 import Trade from './components/trading/Trade';
+import Markets from './components/trading/Markets';
 import Calculator from './components/tools/Calculator';
 import CompoundInterest from './components/tools/CompoundInterest';
 import { useAuth } from './hooks/useAuth';
@@ -65,7 +66,15 @@ const App: React.FC = () => {
                 isAuthenticated && user ? 
                 <Trade user={user} /> : 
                 <Navigate to="/login" replace />
-              } 
+              }
+            />
+            <Route 
+              path="/markets" 
+              element={
+                isAuthenticated && user ? 
+                <Markets /> : 
+                <Navigate to="/login" replace />
+              }
             />
             <Route 
               path="/calculator" 

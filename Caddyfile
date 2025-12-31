@@ -1,8 +1,43 @@
 {
+    # Email for Let's Encrypt certificates
     email aidansjamai99@gmail.com
+    
+    # Reduce log verbosity for better performance on e2-micro
+    log {
+        output discard
+    }
+    
+    # Disable admin API for security and resource savings
+    admin off
+}
+
+# Redirect HTTP to HTTPS
+http://paper-trader.net {
+    redir https://paper-trader.net{uri} permanent
 }
 
 paper-trader.net {
+    # Security headers
+    header {
+        # HSTS - Force HTTPS for 1 year
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        
+        # XSS protection (legacy but still useful)
+        X-XSS-Protection "1; mode=block"
+        
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        
+        # Remove server header for security
+        -Server
+    }
+
     handle /api/* {
         reverse_proxy backend:8080
     }

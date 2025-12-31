@@ -2,10 +2,13 @@ package market
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"papertrader/internal/service"
+	"papertrader/internal/util"
 )
 
 type StockHandler struct {
@@ -47,7 +50,8 @@ func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.service.GetStock(symbol)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
 		return
 	}
 
@@ -62,7 +66,8 @@ func (h *StockHandler) PostStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.SaveStock(req.Symbol, req.Price); err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
 		return
 	}
 
@@ -78,7 +83,8 @@ func (h *StockHandler) DeleteStockBySymbol(w http.ResponseWriter, r *http.Reques
 
 	err := h.service.DeleteStockBySymbol(req.Symbol)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
 		return
 	}
 
@@ -91,9 +97,47 @@ func (h *StockHandler) GetStockHistoricalDataDaily(w http.ResponseWriter, r *htt
 	data, err := h.service.GetHistoricalData(symbol)
 	if err != nil {
 		log.Printf("GetStockHistoricalDataDaily error: %v", err)
-		h.writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
 		return
 	}
 
 	h.writeSuccessResponse(w, http.StatusOK, "Historical stock data retrieved successfully", data)
+}
+
+// GetBatchHistoricalDataDaily handles batch requests for multiple stock symbols
+func (h *StockHandler) GetBatchHistoricalDataDaily(w http.ResponseWriter, r *http.Request) {
+	// Get symbols from query parameter (comma-separated)
+	symbolsParam := r.URL.Query().Get("symbols")
+	if symbolsParam == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "symbols parameter is required (comma-separated)")
+		return
+	}
+
+	// Parse comma-separated symbols
+	symbols := strings.FieldsFunc(symbolsParam, func(c rune) bool {
+		return c == ',' || c == ' '
+	})
+
+	if len(symbols) == 0 {
+		h.writeErrorResponse(w, http.StatusBadRequest, "at least one symbol is required")
+		return
+	}
+
+	// Limit batch size to prevent abuse (adjust based on your MarketStack plan)
+	const maxBatchSize = 15
+	if len(symbols) > maxBatchSize {
+		h.writeErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("maximum %d symbols allowed per request", maxBatchSize))
+		return
+	}
+
+	data, err := h.service.GetBatchHistoricalData(symbols)
+	if err != nil {
+		log.Printf("GetBatchHistoricalDataDaily error: %v", err)
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
+		return
+	}
+
+	h.writeSuccessResponse(w, http.StatusOK, fmt.Sprintf("Historical data retrieved for %d symbols", len(data)), data)
 }

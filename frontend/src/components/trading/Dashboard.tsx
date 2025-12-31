@@ -1,61 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiRequest } from '../../services/api';
 import { User, UserStock } from '../../types';
+import { usePortfolio } from '../../hooks/usePortfolio';
 
 interface DashboardProps {
   user: User;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ user }) => {
-  const [stocks, setStocks] = useState<UserStock[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { stocks, loading, error, fetchPortfolio } = usePortfolio();
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchPortfolio();
-  }, []);
+  }, [fetchPortfolio]);
 
-  const fetchPortfolio = async (): Promise<void> => {
-    try {
-      const response = await apiRequest<UserStock[]>('/investments');
-      
-      // Check content-type before processing - silently ignore HTML responses
-      // (React dev server may return HTML for routes it doesn't recognize during Strict Mode)
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // Silently ignore non-JSON responses - likely from React Strict Mode double render
-        // The successful request will populate the portfolio
-        setLoading(false);
-        return;
-      }
-
-      if (response.ok) {
-        const data = await response.json() as UserStock[];
-        setStocks(data || []);
-      } else {
-        // Only log server errors (5xx), not client errors (4xx)
-        if (response.status >= 500) {
-          console.error('Server error fetching portfolio:', response.status);
-        }
-      }
-    } catch (error) {
-      // Silently ignore JSON parse errors from HTML responses
-      // (these are expected during React Strict Mode double renders)
-      if (error instanceof SyntaxError) {
-        setLoading(false);
-        return;
-      }
-      // Only log unexpected errors
-      console.error('Unexpected error fetching portfolio:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const portfolioValue = stocks.reduce((total: number, stock: UserStock) => {
     return total + (stock.quantity * (stock.current_stock_price || 0));
   }, 0);
+
+  
+  const calculateProfitLoss = (stock: UserStock): number => {
+    return stock.quantity * stock.current_stock_price - stock.quantity * stock.avg_price;
+  };
+
+  const getValueColor = (value: number): string | undefined => {
+    if (value > 0) return '#10b981';
+    if (value < 0) return '#ef4444';
+    return undefined;
+  };
 
   const totalValue = portfolioValue + (user?.balance || 0);
 
@@ -67,12 +41,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     <div className="dashboard">
       <h1>Welcome to Your Dashboard</h1>
       
-      <div className="user-info">
+      {/* <div className="user-info">
         <h3>Account Information</h3>
         <p><strong>Email:</strong> {user?.email}</p>
         <p><strong>Member Since:</strong> {new Date(user?.created_at).toLocaleDateString()}</p>
         <p><strong>Account Balance:</strong> ${user?.balance?.toFixed(2) || '0.00'}</p>
-      </div>
+      </div> */}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px' }}>
         <div style={{ background: '#f8f9fa', padding: '20px', borderRadius: '8px' }}>
@@ -98,6 +72,24 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         <h3 style={{ color: '#333', marginBottom: '16px' }}>Your Holdings</h3>
         {loading ? (
           <p>Loading portfolio...</p>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '40px', background: '#fff3cd', borderRadius: '8px', border: '1px solid #ffc107' }}>
+            <p style={{ color: '#856404', marginBottom: '16px', fontWeight: '600' }}>Error Loading Portfolio</p>
+            <p style={{ color: '#856404', marginBottom: '20px' }}>{error}</p>
+            <button 
+              className="btn btn-primary" 
+              onClick={fetchPortfolio}
+              style={{ marginRight: '10px' }}
+            >
+              Retry
+            </button>
+            <button 
+              className="btn btn-secondary" 
+              onClick={handleStartTrading}
+            >
+              Start Trading
+            </button>
+          </div>
         ) : stocks.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
@@ -108,18 +100,24 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <th style={{ padding: '12px' }}>Avg Price</th>
                   <th style={{ padding: '12px' }}>Current Price</th>
                   <th style={{ padding: '12px' }}>Total Value</th>
+                  <th style={{ padding: '12px' }}>Profit/Loss</th>
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((stock: UserStock) => (
-                  <tr key={stock.symbol} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '12px' }}><strong>{stock.symbol}</strong></td>
-                    <td style={{ padding: '12px' }}>{stock.quantity}</td>
-                    <td style={{ padding: '12px' }}>${stock.avg_price?.toFixed(2)}</td>
-                    <td style={{ padding: '12px' }}>${stock.current_stock_price?.toFixed(2)}</td>
-                    <td style={{ padding: '12px' }}>${(stock.quantity * stock.current_stock_price).toFixed(2)}</td>
-                  </tr>
-                ))}
+                {stocks.map((stock: UserStock) => {
+                  const profitLoss = calculateProfitLoss(stock);
+                  const profitLossColor = getValueColor(profitLoss);
+                  return (
+                    <tr key={stock.symbol} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '12px' }}><strong>{stock.symbol}</strong></td>
+                      <td style={{ padding: '12px' }}>{stock.quantity}</td>
+                      <td style={{ padding: '12px' }}>${stock.avg_price?.toFixed(2)}</td>
+                      <td style={{ padding: '12px' }}>${stock.current_stock_price?.toFixed(2)}</td>
+                      <td style={{ padding: '12px' }}>${(stock.quantity * stock.current_stock_price).toFixed(2)}</td>
+                      <td style={{ padding: '12px', color: profitLossColor }}>${profitLoss.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
