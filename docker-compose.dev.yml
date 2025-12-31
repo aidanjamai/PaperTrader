@@ -16,6 +16,8 @@ services:
       - FRONTEND_URL=http://localhost:3000
       - REDIS_URL=redis://redis:6379
       - REDIS_DB=0
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
     volumes:
       - ./backend:/app  # Mount source code for hot reload
     working_dir: /app
@@ -37,6 +39,7 @@ services:
     environment:
       # Use relative path so requests go to frontend proxy, which forwards to backend container
       - REACT_APP_API_URL=/api
+      - REACT_APP_GOOGLE_CLIENT_ID=${REACT_APP_GOOGLE_CLIENT_ID}
       # Backend URL for proxy configuration (used by setupProxy.ts)
       - BACKEND_URL=http://backend:8080
       # Enable polling for hot reload on Windows file systems

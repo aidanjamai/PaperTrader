@@ -242,8 +242,20 @@ func initialize(cfg *config.Config) (*mux.Router, *account.AccountHandler, *mark
 	// Initialize JWT service with secret from config
 	jwtService := service.NewJWTService(cfg.JWTSecret)
 
+	// Initialize email service (optional, can be nil if not configured)
+	var emailService *service.EmailService
+	if cfg.ResendAPIKey != "" && cfg.FromEmail != "" {
+		emailService = service.NewEmailService(cfg.ResendAPIKey, cfg.FromEmail, cfg.FrontendURL)
+		log.Println("Email service initialized")
+	} else {
+		log.Println("Email service not configured (RESEND_API_KEY or FROM_EMAIL not set)")
+	}
+
+	// Initialize Google OAuth service
+	googleOAuthService := service.NewGoogleOAuthService(userStore, jwtService)
+
 	// Initialize auth service
-	authService := service.NewAuthService(userStore, jwtService)
+	authService := service.NewAuthService(userStore, jwtService, emailService, googleOAuthService)
 
 	// Initialize account handler
 	accountHandler := account.NewAccountHandler(authService, cfg)

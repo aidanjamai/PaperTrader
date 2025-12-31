@@ -710,6 +710,16 @@ const Markets: React.FC = () => {
       });
       return;
     }
+    
+    // Check if email is verified
+    if (!user.email_verified) {
+      setSearchResult({
+        ...stock,
+        error: 'Please verify your email address to trade stocks. Check the banner at the top of the page for instructions.'
+      });
+      return;
+    }
+    
     setSelectedStock(stock);
     setIsModalOpen(true);
   }, [isAuthenticated, user]);

@@ -1,4 +1,5 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
 import { User, TradeAction, BuyStockRequest, SellStockRequest, UserStock } from '../../types';
 
@@ -7,6 +8,7 @@ interface TradeProps {
 }
 
 const Trade: React.FC<TradeProps> = ({ user }) => {
+  const navigate = useNavigate();
   const [tradeType, setTradeType] = useState<TradeAction>('buy');
   const [symbol, setSymbol] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('');
@@ -74,6 +76,37 @@ const Trade: React.FC<TradeProps> = ({ user }) => {
   const handleQuantityChange = (e: ChangeEvent<HTMLInputElement>) => {
     setQuantity(e.target.value);
   };
+
+  // Show verification message if email not verified
+  if (!user.email_verified) {
+    return (
+      <div style={{ marginTop: '60px' }}>
+        <div className="card">
+          <h2>Verify Your Email</h2>
+          <div style={{
+            background: '#fff3cd',
+            padding: '20px',
+            borderRadius: '8px',
+            border: '1px solid #ffc107',
+            marginBottom: '20px'
+          }}>
+            <p style={{ color: '#856404', marginBottom: '12px', fontWeight: '600' }}>
+              Email verification required
+            </p>
+            <p style={{ color: '#856404', marginBottom: '16px' }}>
+              Please verify your email address before you can start trading. Check the banner at the top of the page for instructions, or check your inbox for the verification email.
+            </p>
+            <button 
+              className="btn btn-primary"
+              onClick={() => navigate('/markets')}
+            >
+              Browse Markets
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginTop: '60px' }}>

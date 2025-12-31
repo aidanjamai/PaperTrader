@@ -248,3 +248,74 @@ func (h *AccountHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	h.writeJSONResponse(w, http.StatusOK, GetAllUsersResponse{Users: users})
 }
+
+func (h *AccountHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Verification token required")
+		return
+	}
+
+	err := h.AuthService.VerifyEmail(token)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid or expired verification token")
+		return
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, AuthResponse{
+		Success: true,
+		Message: "Email verified successfully",
+	})
+}
+
+func (h *AccountHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	err := h.AuthService.ResendVerificationEmail(req.Email)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, AuthResponse{
+		Success: true,
+		Message: "Verification email sent",
+	})
+}
+
+func (h *AccountHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.Token == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Google token required")
+		return
+	}
+
+	user, token, err := h.AuthService.LoginWithGoogle(req.Token)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusUnauthorized, "Google authentication failed")
+		return
+	}
+
+	h.setTokenCookie(w, r, token)
+
+	response := AuthResponse{
+		Success: true,
+		Message: "Login successful",
+		User:    user,
+	}
+	h.writeJSONResponse(w, http.StatusOK, response)
+}

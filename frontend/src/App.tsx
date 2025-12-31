@@ -1,8 +1,11 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import Navbar from './components/layout/Navbar';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
+import VerifyEmail from './components/auth/VerifyEmail';
+import EmailVerificationBanner from './components/auth/EmailVerificationBanner';
 import Dashboard from './components/trading/Dashboard';
 import Home from './components/common/Home';
 import Trade from './components/trading/Trade';
@@ -11,6 +14,8 @@ import Calculator from './components/tools/Calculator';
 import CompoundInterest from './components/tools/CompoundInterest';
 import { useAuth } from './hooks/useAuth';
 import './App.css';
+
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const App: React.FC = () => {
   const { user, isAuthenticated, loading, login, logout } = useAuth();
@@ -26,14 +31,18 @@ const App: React.FC = () => {
   }
 
   return (
-    <Router>
-      <div className="App">
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <Router>
+        <div className="App">
         <Navbar 
           isAuthenticated={isAuthenticated} 
           user={user}
           onLogout={logout}
         />
         <div className="container">
+          {isAuthenticated && user && !user.email_verified && (
+            <EmailVerificationBanner email={user.email} />
+          )}
           <Routes>
             <Route path="/" element={<Home />} />
             <Route 
@@ -51,6 +60,10 @@ const App: React.FC = () => {
                 <Navigate to="/dashboard" replace /> : 
                 <Register onLogin={login} />
               } 
+            />
+            <Route 
+              path="/verify-email" 
+              element={<VerifyEmail />} 
             />
             <Route 
               path="/dashboard" 
@@ -87,7 +100,8 @@ const App: React.FC = () => {
           </Routes>
         </div>
       </div>
-    </Router>
+      </Router>
+    </GoogleOAuthProvider>
   );
 };
 

@@ -16,6 +16,7 @@ interface UseAuthReturn {
   login: (user: User) => void;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 // Shared state across all useAuth instances (singleton pattern)
@@ -256,6 +257,50 @@ export const useAuth = (): UseAuthReturn => {
     }
   }, []);
 
+  /**
+   * Force refresh user profile from server, bypassing cache
+   * Useful after email verification or profile updates
+   */
+  const refreshUser = useCallback(async () => {
+    try {
+      // Clear cache to force fresh fetch
+      localStorage.removeItem(AUTH_CACHE_KEY);
+      localStorage.removeItem(AUTH_TIMESTAMP_KEY);
+      
+      // Check if authenticated first
+      const authResponse = await apiRequest<AuthResponse>('/account/auth');
+      if (authResponse.ok) {
+        const authData = await authResponse.json() as AuthResponse;
+        if (authData.success) {
+          // Fetch fresh user profile
+          const profileResponse = await apiRequest<User>('/account/profile');
+          if (profileResponse.ok) {
+            const userData = await profileResponse.json() as User;
+            
+            // Update global state
+            globalAuthState.user = userData;
+            globalAuthState.isAuthenticated = true;
+            
+            // Update cache with fresh data
+            try {
+              localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(userData));
+              localStorage.setItem(AUTH_TIMESTAMP_KEY, Date.now().toString());
+            } catch (error) {
+              console.warn('[useAuth] Error caching user data:', error);
+            }
+            
+            if (isMountedRef.current) {
+              setUser(userData);
+              setIsAuthenticated(true);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[useAuth] Refresh user failed:', error);
+    }
+  }, []);
+
   return {
     user,
     isAuthenticated,
@@ -263,6 +308,7 @@ export const useAuth = (): UseAuthReturn => {
     login,
     logout,
     checkAuth,
+    refreshUser,
   };
 };
 

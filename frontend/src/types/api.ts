@@ -12,6 +12,7 @@ export interface User {
   email: string;
   created_at: string;
   balance: number;
+  email_verified?: boolean;
 }
 
 /**
