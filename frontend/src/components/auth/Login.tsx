@@ -37,8 +37,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       const data = await response.json() as AuthResponse;
 
-      if (response.ok && data.success && data.user && data.token) {
-        localStorage.setItem('token', data.token);
+      if (response.ok && data.success && data.user) {
+        // Token is set as HttpOnly cookie by backend, no need to store in localStorage
         localStorage.setItem('user', JSON.stringify(data.user));
         onLogin(data.user);
         navigate('/dashboard');
