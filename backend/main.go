@@ -58,7 +58,7 @@ func main() {
 		})
 	}
 
-	// Enhanced health check route with dependency checks
+	// Enhanced health check route with dependency checks (accessible at /health for internal checks)
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Check database connection
 		if err := db.Ping(); err != nil {
@@ -83,6 +83,29 @@ func main() {
 
 	// API routes
 	apiRouter := router.PathPrefix("/api").Subrouter()
+	
+	// Health check endpoint accessible via /api/health for frontend
+	apiRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Check database connection
+		if err := db.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("DB_UNHEALTHY"))
+			return
+		}
+		
+		// Check Redis connection if available
+		if redisClient != nil {
+			ctx := r.Context()
+			if err := redisClient.Ping(ctx).Err(); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("REDIS_UNHEALTHY"))
+				return
+			}
+		}
+		
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
 
 	// Investments routes - must be registered on apiRouter (not main router) since apiRouter handles all /api/* requests
 	investmentsRouter := investments.Routes(investmentsHandler, jwtService)
