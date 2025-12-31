@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   caddy:
     image: caddy:2
@@ -38,6 +36,9 @@ services:
         compress: "true"
 
   backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     image: papertrader-backend:latest
     restart: unless-stopped
     environment:
@@ -48,7 +49,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - REDIS_DB=0
       - JWT_SECRET=${JWT_SECRET}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - FRONTEND_URL=${FRONTEND_URL:-https://paper-trader.net}
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,6 +80,9 @@ services:
       - no-new-privileges:true
 
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     image: papertrader-frontend:latest
     restart: unless-stopped
     environment:
