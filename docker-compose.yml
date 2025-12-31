@@ -44,7 +44,7 @@ services:
     environment:
       - PORT=8080
       - ENVIRONMENT=${ENVIRONMENT:-production}
-      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/papertrader?sslmode=require
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
       - REDIS_URL=redis://redis:6379
       - REDIS_DB=0
