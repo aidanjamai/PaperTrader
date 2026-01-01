@@ -35,6 +35,9 @@ paper-trader.net {
         # Referrer policy
         Referrer-Policy "strict-origin-when-cross-origin"
         
+        # Cross-Origin-Opener-Policy - Allow OAuth popups
+        Cross-Origin-Opener-Policy "same-origin-allow-popups"
+        
         # Content Security Policy
         Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.marketstack.com https://accounts.google.com https://www.googleapis.com;"
         

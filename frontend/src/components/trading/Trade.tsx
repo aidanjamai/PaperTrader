@@ -2,6 +2,7 @@ import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
 import { User, TradeAction, BuyStockRequest, SellStockRequest, UserStock } from '../../types';
+import { useAuth } from '../../hooks/useAuth';
 
 interface TradeProps {
   user: User;
@@ -9,6 +10,7 @@ interface TradeProps {
 
 const Trade: React.FC<TradeProps> = ({ user }) => {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [tradeType, setTradeType] = useState<TradeAction>('buy');
   const [symbol, setSymbol] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('');
@@ -51,6 +53,10 @@ const Trade: React.FC<TradeProps> = ({ user }) => {
       if (response.ok) {
         await response.json();
         setMessage(`${tradeType === 'buy' ? 'Bought' : 'Sold'} ${quantityNum} shares of ${symbol.toUpperCase()} successfully!`);
+        
+        // Refresh user balance immediately after successful trade
+        await refreshUser();
+        
         setSymbol('');
         setQuantity('');
       } else {
