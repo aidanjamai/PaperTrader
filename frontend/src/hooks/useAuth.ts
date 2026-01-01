@@ -32,6 +32,23 @@ let globalAuthState: {
   checkPromise: null,
 };
 
+// Subscription pattern: listeners for global state changes
+type StateChangeListener = () => void;
+let globalStateListeners: Set<StateChangeListener> = new Set();
+
+/**
+ * Notify all subscribed components of global state changes
+ */
+const notifyListeners = () => {
+  globalStateListeners.forEach(listener => {
+    try {
+      listener();
+    } catch (error) {
+      console.warn('[useAuth] Error in state change listener:', error);
+    }
+  });
+};
+
 // Cache keys
 const AUTH_CACHE_KEY = 'papertrader_auth_user';
 const AUTH_TIMESTAMP_KEY = 'papertrader_auth_timestamp';
@@ -61,10 +78,8 @@ export const useAuth = (): UseAuthReturn => {
           localStorage.removeItem(AUTH_CACHE_KEY);
           localStorage.removeItem(AUTH_TIMESTAMP_KEY);
           
-          if (isMountedRef.current) {
-            setIsAuthenticated(false);
-            setUser(null);
-          }
+          // Notify all listeners of state change
+          notifyListeners();
         }
       }
     } catch (error) {
@@ -105,11 +120,8 @@ export const useAuth = (): UseAuthReturn => {
           globalAuthState.isAuthenticated = true;
           globalAuthState.loading = false;
           
-          if (isMountedRef.current) {
-            setUser(userData);
-            setIsAuthenticated(true);
-            setLoading(false);
-          }
+          // Notify all listeners of state change
+          notifyListeners();
           
           // Still verify auth in background (non-blocking)
           verifyAuthInBackground();
@@ -145,10 +157,8 @@ export const useAuth = (): UseAuthReturn => {
                 console.warn('[useAuth] Error caching user data:', error);
               }
               
-              if (isMountedRef.current) {
-                setUser(userData);
-                setIsAuthenticated(true);
-              }
+              // Notify all listeners of state change
+              notifyListeners();
             }
           } else {
             globalAuthState.isAuthenticated = false;
@@ -156,10 +166,8 @@ export const useAuth = (): UseAuthReturn => {
             localStorage.removeItem(AUTH_CACHE_KEY);
             localStorage.removeItem(AUTH_TIMESTAMP_KEY);
             
-            if (isMountedRef.current) {
-              setIsAuthenticated(false);
-              setUser(null);
-            }
+            // Notify all listeners of state change
+            notifyListeners();
           }
         } else {
           globalAuthState.isAuthenticated = false;
@@ -167,27 +175,22 @@ export const useAuth = (): UseAuthReturn => {
           localStorage.removeItem(AUTH_CACHE_KEY);
           localStorage.removeItem(AUTH_TIMESTAMP_KEY);
           
-          if (isMountedRef.current) {
-            setIsAuthenticated(false);
-            setUser(null);
-          }
+          // Notify all listeners of state change
+          notifyListeners();
         }
       } catch (error) {
         console.error('[useAuth] Auth check failed:', error);
         globalAuthState.isAuthenticated = false;
         globalAuthState.user = null;
         
-        if (isMountedRef.current) {
-          setIsAuthenticated(false);
-          setUser(null);
-        }
+        // Notify all listeners of state change
+        notifyListeners();
       } finally {
         globalAuthState.loading = false;
         globalAuthState.checkPromise = null;
         
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
+        // Notify all listeners of loading state change
+        notifyListeners();
       }
     })();
 
@@ -195,24 +198,37 @@ export const useAuth = (): UseAuthReturn => {
   }, [verifyAuthInBackground]);
 
   /**
-   * Initialize auth state on mount
-   * Only runs once globally, not per component
+   * Sync local state with global state
+   */
+  const syncWithGlobalState = useCallback(() => {
+    if (isMountedRef.current) {
+      setUser(globalAuthState.user);
+      setIsAuthenticated(globalAuthState.isAuthenticated);
+      setLoading(globalAuthState.loading);
+    }
+  }, []);
+
+  /**
+   * Initialize auth state on mount and subscribe to global state changes
    */
   useEffect(() => {
     // Only check auth if not already checked
     if (globalAuthState.checkPromise === null && !globalAuthState.user) {
       checkAuth();
     } else {
-      // Sync with global state
-      setUser(globalAuthState.user);
-      setIsAuthenticated(globalAuthState.isAuthenticated);
-      setLoading(globalAuthState.loading);
+      // Sync with global state on mount
+      syncWithGlobalState();
     }
+
+    // Subscribe to global state changes
+    globalStateListeners.add(syncWithGlobalState);
 
     return () => {
       isMountedRef.current = false;
+      // Unsubscribe when component unmounts
+      globalStateListeners.delete(syncWithGlobalState);
     };
-  }, [checkAuth]);
+  }, [checkAuth, syncWithGlobalState]);
 
   /**
    * Login handler - sets user and authenticated state
@@ -230,8 +246,8 @@ export const useAuth = (): UseAuthReturn => {
       console.warn('[useAuth] Error caching user data:', error);
     }
     
-    setIsAuthenticated(true);
-    setUser(userData);
+    // Notify all listeners of state change
+    notifyListeners();
   }, []);
 
   /**
@@ -252,8 +268,8 @@ export const useAuth = (): UseAuthReturn => {
       globalAuthState.isAuthenticated = false;
       globalAuthState.loading = false;
       
-      setIsAuthenticated(false);
-      setUser(null);
+      // Notify all listeners of state change
+      notifyListeners();
     }
   }, []);
 
@@ -289,10 +305,9 @@ export const useAuth = (): UseAuthReturn => {
               console.warn('[useAuth] Error caching user data:', error);
             }
             
-            if (isMountedRef.current) {
-              setUser(userData);
-              setIsAuthenticated(true);
-            }
+            // Notify all listeners of state change
+            // This ensures Dashboard and all other components update immediately
+            notifyListeners();
           }
         }
       }
