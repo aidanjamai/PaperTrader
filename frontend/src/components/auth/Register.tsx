@@ -166,7 +166,7 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
             <path fill="#FBBC05" d="M3.964 10.712c-.18-.54-.282-1.117-.282-1.712 0-.595.102-1.172.282-1.712V4.956H.957C.348 6.174 0 7.55 0 9c0 1.45.348 2.826.957 4.044l3.007-2.332z"/>
             <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.956L3.964 7.288C4.672 5.163 6.656 3.58 9 3.58z"/>
           </svg>
-          {googleLoading ? 'Signing in...' : 'Continue with Google'}
+          {googleLoading ? 'Signing in...' : 'Register with Google'}
         </button>
 
         <div style={{ 
