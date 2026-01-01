@@ -69,7 +69,7 @@ const App: React.FC = () => {
               path="/dashboard" 
               element={
                 isAuthenticated && user ? 
-                <Dashboard user={user} /> : 
+                <Dashboard /> : 
                 <Navigate to="/login" replace />
               } 
             />
@@ -77,7 +77,7 @@ const App: React.FC = () => {
               path="/trade" 
               element={
                 isAuthenticated && user ? 
-                <Trade user={user} /> : 
+                <Trade /> : 
                 <Navigate to="/login" replace />
               }
             />

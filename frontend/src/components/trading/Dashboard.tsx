@@ -1,14 +1,12 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, UserStock } from '../../types';
+import { UserStock } from '../../types';
 import { usePortfolio } from '../../hooks/usePortfolio';
+import { useAuth } from '../../hooks/useAuth';
 
-interface DashboardProps {
-  user: User;
-}
-
-const Dashboard: React.FC<DashboardProps> = ({ user }) => {
+const Dashboard: React.FC = () => {
   const { stocks, loading, fetchPortfolio } = usePortfolio();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {

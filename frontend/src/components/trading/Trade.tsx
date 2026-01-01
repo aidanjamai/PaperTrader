@@ -1,16 +1,12 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
-import { User, TradeAction, BuyStockRequest, SellStockRequest, UserStock } from '../../types';
+import { TradeAction, BuyStockRequest, SellStockRequest, UserStock } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
 
-interface TradeProps {
-  user: User;
-}
-
-const Trade: React.FC<TradeProps> = ({ user }) => {
+const Trade: React.FC = () => {
   const navigate = useNavigate();
-  const { refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [tradeType, setTradeType] = useState<TradeAction>('buy');
   const [symbol, setSymbol] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('');
@@ -84,7 +80,7 @@ const Trade: React.FC<TradeProps> = ({ user }) => {
   };
 
   // Show verification message if email not verified
-  if (!user.email_verified) {
+  if (!user || !user.email_verified) {
     return (
       <div style={{ marginTop: '60px' }}>
         <div className="card">
