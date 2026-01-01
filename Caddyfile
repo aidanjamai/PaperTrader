@@ -36,7 +36,7 @@ paper-trader.net {
         Referrer-Policy "strict-origin-when-cross-origin"
         
         # Content Security Policy
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.marketstack.com;"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.marketstack.com https://accounts.google.com https://www.googleapis.com;"
         
         # Remove server header for security
         -Server
