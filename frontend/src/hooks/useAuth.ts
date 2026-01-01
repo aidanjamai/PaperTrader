@@ -209,26 +209,33 @@ export const useAuth = (): UseAuthReturn => {
   }, []);
 
   /**
-   * Initialize auth state on mount and subscribe to global state changes
+   * Subscribe to global state changes - runs once on mount
    */
   useEffect(() => {
-    // Only check auth if not already checked
-    if (globalAuthState.checkPromise === null && !globalAuthState.user) {
-      checkAuth();
-    } else {
-      // Sync with global state on mount
-      syncWithGlobalState();
-    }
-
     // Subscribe to global state changes
     globalStateListeners.add(syncWithGlobalState);
+
+    // Sync with global state immediately on mount
+    syncWithGlobalState();
 
     return () => {
       isMountedRef.current = false;
       // Unsubscribe when component unmounts
       globalStateListeners.delete(syncWithGlobalState);
     };
-  }, [checkAuth, syncWithGlobalState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run on mount/unmount
+
+  /**
+   * Initialize auth check - runs once globally
+   */
+  useEffect(() => {
+    // Only check auth if not already checked and no user exists
+    if (globalAuthState.checkPromise === null && !globalAuthState.user) {
+      checkAuth();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run once on mount
 
   /**
    * Login handler - sets user and authenticated state
