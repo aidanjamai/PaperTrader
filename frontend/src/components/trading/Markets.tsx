@@ -49,6 +49,7 @@ interface TradeModalProps {
 }
 
 const TradeModal: React.FC<TradeModalProps> = ({ stock, user, isOpen, onClose, onTradeSuccess }) => {
+  const { refreshUser } = useAuth();
   const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
   const [quantity, setQuantity] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -95,6 +96,10 @@ const TradeModal: React.FC<TradeModalProps> = ({ stock, user, isOpen, onClose, o
       if (response.ok) {
         await response.json();
         setMessage(`${tradeType === 'buy' ? 'Bought' : 'Sold'} ${quantityNum} shares of ${stock.symbol} successfully!`);
+        
+        // Refresh user balance immediately after successful trade
+        await refreshUser();
+        
         setQuantity('');
         setTimeout(() => {
           onTradeSuccess();
