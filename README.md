@@ -36,7 +36,7 @@ PaperTrader is a simulated stock trading platform that provides:
 
 ### Backend
 
-- **Language**: Go 1.23.0
+- **Language**: Go 1.25
 - **Web Framework**: Gorilla Mux (HTTP router and URL matcher)
 - **Database**: PostgreSQL 15 (ACID-compliant relational database)
 - **Cache & Rate Limiting**: Redis 7 (in-memory data store)
@@ -99,11 +99,12 @@ PaperTrader is a simulated stock trading platform that provides:
 └──────┬───────────┘                      └──────────────────┘
        │
        ├──► PostgreSQL (Port 5432)
-       │    └─ Users, Trades, Portfolio
+       │    └─ Users, Trades, Portfolio, Watchlist, Stock History
        │
        ├──► Redis (Port 6379)
        │    └─ Stock Price Cache (15min TTL)
        │    └─ Historical Data Cache (24hr TTL)
+       │    └─ Empty-Range Negative Cache (6hr TTL)
        │    └─ Rate Limiting
        │
        └──► MarketStack API (External)
@@ -155,15 +156,18 @@ PaperTrader is a simulated stock trading platform that provides:
 
 - **Real-Time Stock Prices** - Current stock prices via MarketStack API
 - **Historical Data** - Daily historical stock data with price changes and volume
+- **Stock-Detail Charts** - Per-symbol price-history chart (1M / 3M / YTD / 1Y) with daily closes persisted to Postgres so repeat loads serve from the DB instead of MarketStack
 - **Intelligent Caching** - Redis-based caching to reduce API calls:
   - Stock prices: 15-minute TTL
-  - Historical data: 24-hour TTL
+  - Historical (latest+previous) data: 24-hour TTL
+  - Empty-range negative cache (avoids re-fetching weekend gaps): 6-hour TTL
+- **Persistent EOD Storage** - `stock_history` table holds daily closes long-term so the chart endpoint typically issues zero MarketStack calls per page-load on warm symbols
 - **Rate Limiting** - Per-user and per-IP rate limiting via Redis sliding window
 
 ### Financial Tools
 
 - **Portfolio Calculator** - Calculate potential gains/losses with projected prices
-- **Compound Interest Calculator** - Calculate future value with monthly contributions
+- **Compound Interest Calculator** - Calculate future value with monthly contributions, including a hand-rolled SVG growth chart visualizing balance vs. contributions over time
 - **Portfolio Analytics** - View total portfolio value, cash, and net worth
 
 ### User Experience
@@ -214,14 +218,17 @@ PaperTrader/
 │       │   ├── trade.go              # Trade model
 │       │   ├── trade_store.go        # Trade database operations
 │       │   ├── portfolio_store.go    # Portfolio/holdings operations
+│       │   ├── watchlist_store.go    # Watchlist CRUD
+│       │   ├── stock_history_store.go # Persisted EOD closes (chunked upserts)
 │       │   └── dbtx.go               # Database transaction interface
 │       └── service/                  # Business logic layer
 │           ├── auth.go               # Authentication service
 │           ├── jwt.go                # JWT token service
-│           ├── market.go             # Market data service
+│           ├── market.go             # Market data service (current price, series with gap-fill)
 │           ├── investment.go         # Trading service (buy/sell logic)
+│           ├── watchlist.go          # Watchlist service
 │           ├── stock_cache.go        # Stock price caching interface
-│           ├── historical_cache.go   # Historical data caching interface
+│           ├── historical_cache.go   # Historical data + empty-range cache (Redis)
 │           ├── rate_limiter.go       # Rate limiting interface
 │           └── errors.go             # Service error definitions
 │
@@ -237,17 +244,21 @@ PaperTrader/
 │       │   │   ├── Login.tsx
 │       │   │   └── Register.tsx
 │       │   ├── trading/              # Trading features
-│       │   │   ├── Dashboard.tsx     # Portfolio dashboard
-│       │   │   ├── Trade.tsx         # Buy/sell interface
-│       │   │   └── Markets.tsx       # Market listings (placeholder)
+│       │   │   ├── Dashboard.tsx     # Portfolio dashboard (clickable rows → /stock/:symbol)
+│       │   │   ├── Trade.tsx         # Buy/sell interface (?symbol= prefill)
+│       │   │   ├── Markets.tsx       # Market listings (placeholder)
+│       │   │   ├── History.tsx       # Trade history (filter + paginate)
+│       │   │   └── WatchlistCard.tsx # Watchlist on the dashboard (clickable rows)
 │       │   ├── tools/                # Financial calculators
 │       │   │   ├── Calculator.tsx    # Portfolio calculator
-│       │   │   └── CompoundInterest.tsx
+│       │   │   ├── CompoundInterest.tsx
+│       │   │   └── GrowthChart.tsx   # Hand-rolled SVG balance-over-time chart
 │       │   ├── layout/               # Layout components
 │       │   │   └── Navbar.tsx        # Navigation bar
 │       │   └── common/               # Shared components
 │       │       ├── Home.tsx          # Landing page
-│       │       ├── Stock.tsx         # Stock detail view (placeholder)
+│       │       ├── Stock.tsx         # Stock detail page (price chart, range tabs, actions)
+│       │       ├── PriceChart.tsx    # Hand-rolled SVG price chart (gain/loss tone)
 │       │       └── ProtectedRoute.tsx # Route protection wrapper
 │       ├── hooks/                    # Custom React hooks
 │       │   ├── useAuth.ts            # Authentication state management
@@ -390,8 +401,10 @@ The database consists of:
 
 Key tables:
 - `users` - User accounts and authentication
-- `trades` - Transaction history (event log)
+- `trades` - Transaction history (event log, append-only via DB triggers)
 - `portfolio` - Current stock holdings (materialized view)
+- `watchlist` - Per-user tracked symbols (no holdings required)
+- `stock_history` - Persisted daily EOD closes per symbol (shared cache, no FK to users)
 
 ---
 
