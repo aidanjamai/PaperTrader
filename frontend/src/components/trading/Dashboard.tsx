@@ -227,8 +227,23 @@ const Dashboard: React.FC = () => {
               {filtered.map((s: UserStock & { value: number; pnl: number; pnlPct: number }) => {
                 const pillTone: 'gain' | 'loss' | null =
                   s.pnl > 0 ? 'gain' : s.pnl < 0 ? 'loss' : null;
+                const goToDetail = () => navigate(`/stock/${encodeURIComponent(s.symbol)}`);
                 return (
-                  <tr key={s.symbol}>
+                  <tr
+                    key={s.symbol}
+                    onClick={goToDetail}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        goToDetail();
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open ${s.symbol} detail`}
+                    style={{ cursor: 'pointer' }}
+                    title={`Open ${s.symbol} detail`}
+                  >
                     <td>
                       <div className="ticker">
                         <span className="mark" aria-hidden="true">

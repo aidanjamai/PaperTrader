@@ -93,7 +93,7 @@ graph TB
         AuthService[Auth Service<br/>User Management<br/>JWT Generation]
         GoogleOAuthService[Google OAuth Service<br/>ID Token Verification]
         EmailService[Email Service<br/>Resend API]
-        MarketService[Market Service<br/>Stock Data<br/>Cache Management]
+        MarketService[Market Service<br/>Stock Data<br/>Cache + DB-backed Series<br/>Empty-Range Negative Cache]
         InvestmentService[Investment Service<br/>Trade Execution<br/>ACID Transactions<br/>Idempotency Keys]
         WatchlistService[Watchlist Service]
         JWTService[JWT Service<br/>Token Validation]
@@ -104,12 +104,13 @@ graph TB
         TradeStore[Trade Store<br/>Append-only Trade Records]
         PortfolioStore[Portfolio Store<br/>Holdings Management]
         WatchlistStore[Watchlist Store]
+        StockHistoryStore[Stock History Store<br/>Persisted EOD Closes<br/>Batched Upserts]
         StockCache[Stock Cache Interface<br/>Redis Implementation]
-        HistoricalCache[Historical Cache Interface<br/>Redis Implementation]
+        HistoricalCache[Historical Cache Interface<br/>Redis + Empty-Range Memo]
     end
 
     subgraph "Persistence Layer"
-        PostgreSQL[(PostgreSQL<br/>Users, Trades, Portfolio)]
+        PostgreSQL[(PostgreSQL<br/>Users, Trades, Portfolio,<br/>Watchlist, Stock History)]
         Redis[(Redis<br/>Cache & Rate Limiting)]
     end
 
@@ -142,6 +143,7 @@ graph TB
     GoogleOAuthService --> JWTService
     MarketService --> StockCache
     MarketService --> HistoricalCache
+    MarketService --> StockHistoryStore
     InvestmentService --> MarketService
     InvestmentService --> UserStore
     InvestmentService --> TradeStore
@@ -153,6 +155,7 @@ graph TB
     TradeStore --> PostgreSQL
     PortfolioStore --> PostgreSQL
     WatchlistStore --> PostgreSQL
+    StockHistoryStore --> PostgreSQL
     StockCache --> Redis
     HistoricalCache --> Redis
 
@@ -213,7 +216,17 @@ erDiagram
         TIMESTAMP created_at
         UNIQUE user_id_symbol "UNIQUE(user_id, symbol)"
     }
+
+    STOCK_HISTORY {
+        VARCHAR symbol PK "Composite PK"
+        DATE trade_date PK "Composite PK"
+        NUMERIC close "NUMERIC(20,8)"
+        BIGINT volume "Daily share volume"
+        TIMESTAMP fetched_at "Refreshed on conflict"
+    }
 ```
+
+> `STOCK_HISTORY` is a **shared cache table** — no relationship to `USERS`. Every user that views the same symbol's chart hits the same rows.
 
 ### Table Details
 
@@ -262,6 +275,16 @@ erDiagram
   - Unique constraint on (user_id, symbol)
 - **Indexes**: `idx_watchlist_user_id` on `user_id` for fast list lookups.
 
+#### stock_history
+- **Purpose**: Persisted EOD closes per symbol; backs the stock-detail price chart so repeat loads are served from Postgres rather than MarketStack.
+- **Key Fields**:
+  - `symbol` + `trade_date`: composite primary key (no surrogate id)
+  - `close`: `NUMERIC(20,8)` — matches `portfolio.avg_price` precision
+  - `volume`: `BIGINT` — high-volume tickers exceed `INTEGER`
+  - `fetched_at`: refreshed on every conflicting upsert; useful for staleness audits
+- **Indexes**: Primary key alone — every chart query is a `(symbol, trade_date BETWEEN ...)` range scan covered by the PK.
+- **Notes**: Independent of users. Written by `MarketService.GetHistoricalSeries` via batched upserts (`upsertBatchSize = 1000` to stay under the Postgres parameter cap).
+
 ---
 
 ## API Architecture
@@ -291,6 +314,7 @@ graph LR
     subgraph "Protected Endpoints - Market (JWT + Rate Limit)"
         GetStock[GET /api/market/stock?symbol=AAPL]
         Historical[GET /api/market/stock/historical/daily?symbol=AAPL]
+        Series[GET /api/market/stock/historical/series<br/>?symbol=AAPL&days=90<br/>DB-backed, Redis empty-range memo]
         BatchHistorical[GET /api/market/stock/historical/daily/batch<br/>JWT only — excluded from rate limit]
         PostStock[POST /api/market/stock]
         DeleteStock[DELETE /api/market/stock/symbol<br/>symbol in JSON body]
@@ -320,6 +344,7 @@ graph LR
     Balance --> JWT
     GetStock --> JWT
     Historical --> JWT
+    Series --> JWT
     BatchHistorical --> JWT
     PostStock --> JWT
     DeleteStock --> JWT
@@ -351,7 +376,8 @@ graph LR
 | GET | `/api/account/auth` | JWT | Check authentication status |
 | GET | `/api/account/balance` | JWT | Get user balance |
 | GET | `/api/market/stock` | JWT + Rate Limit | Get current stock price (`?symbol=AAPL`) |
-| GET | `/api/market/stock/historical/daily` | JWT + Rate Limit | Get historical stock data |
+| GET | `/api/market/stock/historical/daily` | JWT + Rate Limit | Get latest + previous close (single point) |
+| GET | `/api/market/stock/historical/series` | JWT + Rate Limit | Get daily-close time series (`?symbol=&days=`); served from `stock_history` table with MarketStack fill-in for missing dates and a Redis negative cache for empty windows |
 | GET | `/api/market/stock/historical/daily/batch` | JWT (no rate limit) | Batched historical fetch — excluded from rate limiting because it reduces total MarketStack calls |
 | POST | `/api/market/stock` | JWT + Rate Limit | Create / refresh stock cache entry |
 | DELETE | `/api/market/stock/symbol` | JWT + Rate Limit | Invalidate cached stock; **symbol provided in JSON request body** (path is literal `/stock/symbol`) |
@@ -480,6 +506,49 @@ sequenceDiagram
         MarketService->>Redis: SET stock:AAPL:2024-01-15<br/>TTL: 15 minutes
         MarketService-->>Client: Return fresh data
     end
+```
+
+### Stock-History Series Fetch (DB-backed with gap fill)
+
+The chart endpoint reads from Postgres first and only consults MarketStack
+for dates that aren't already persisted. Empty MarketStack responses (weekend
+gaps, holidays) are memoized in Redis so they don't burn quota on every load.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant MarketService
+    participant StockHistoryStore
+    participant PostgreSQL
+    participant Redis
+    participant MarketStack
+
+    Client->>MarketService: GET /api/market/stock/historical/series<br/>?symbol=AAPL&days=90
+
+    MarketService->>StockHistoryStore: GetRange(AAPL, from, to)
+    StockHistoryStore->>PostgreSQL: SELECT ... WHERE symbol=$1<br/>AND trade_date BETWEEN $2 AND $3
+    PostgreSQL-->>StockHistoryStore: stored rows
+    StockHistoryStore-->>MarketService: stored
+
+    Note over MarketService: Compute backward gap [from, earliest-1]<br/>and forward gap [latest+1, to]
+
+    loop for each non-empty gap
+        MarketService->>Redis: GET historical-empty:AAPL:gapFrom:gapTo
+        alt Memo present (recent empty result)
+            Redis-->>MarketService: hit → skip API call
+        else No memo
+            MarketService->>MarketStack: GET /v1/eod?symbols=AAPL<br/>&date_from=&date_to=&offset=
+            MarketStack-->>MarketService: page of EOD rows<br/>(paginated until short page)
+            alt Rows returned
+                MarketService->>StockHistoryStore: UpsertMany(rows)
+                StockHistoryStore->>PostgreSQL: INSERT ... ON CONFLICT DO UPDATE<br/>(chunked at 1000 rows)
+            else Zero rows (weekend/holiday)
+                MarketService->>Redis: SET historical-empty:AAPL:gapFrom:gapTo<br/>TTL 6h
+            end
+        end
+    end
+
+    MarketService-->>Client: { symbol, from, to, points: [...] }
 ```
 
 ### Rate Limiting Flow
@@ -644,4 +713,4 @@ sequenceDiagram
 ---
 
 *Last Updated: 2026-05-03*
-*Architecture Version: 2.1 — adds watchlist, Google OAuth, email verification, idempotency keys on trades, and append-only trade triggers*
+*Architecture Version: 2.2 — adds stock-history series endpoint backed by `stock_history` table with Redis empty-range negative cache, plus stock-detail page on the frontend (2.1 added watchlist, Google OAuth, email verification, idempotency keys on trades, and append-only trade triggers)*

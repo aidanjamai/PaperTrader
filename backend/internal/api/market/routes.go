@@ -16,7 +16,11 @@ func Mount(r *mux.Router, h *StockHandler, jwtService *service.JWTService, rateL
 	r.Use(auth.JWTMiddleware(jwtService, cfg))
 
 	// Rate-limit per-symbol endpoints; the batch endpoint is exempt because it
-	// reduces total upstream calls rather than amplifying them.
+	// reduces total upstream calls rather than amplifying them. Note that the
+	// new /stock/historical/series endpoint is intentionally NOT exempted —
+	// each call hits one symbol, so it's the same shape as /stock and should
+	// share its rate budget. Add new exemptions here only if the endpoint
+	// genuinely consolidates upstream traffic.
 	if rateLimiter != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -32,4 +36,5 @@ func Mount(r *mux.Router, h *StockHandler, jwtService *service.JWTService, rateL
 	r.HandleFunc("/stock", h.GetStock).Methods("GET")
 	r.HandleFunc("/stock/historical/daily", h.GetStockHistoricalDataDaily).Methods("GET")
 	r.HandleFunc("/stock/historical/daily/batch", h.GetBatchHistoricalDataDaily).Methods("GET")
+	r.HandleFunc("/stock/historical/series", h.GetStockHistoricalSeries).Methods("GET")
 }

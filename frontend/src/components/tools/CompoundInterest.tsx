@@ -1,11 +1,13 @@
 import React, { useState, ChangeEvent } from 'react';
 import { formatMoney, formatSignedMoney } from '../primitives/format';
 import ToolsTabs from './ToolsTabs';
+import GrowthChart, { GrowthSeriesPoint } from './GrowthChart';
 
 interface CompoundInterestResult {
   futureValue: number;
   totalContributions: number;
   interestEarned: number;
+  series: GrowthSeriesPoint[];
 }
 
 const CompoundInterest: React.FC = () => {
@@ -21,21 +23,32 @@ const CompoundInterest: React.FC = () => {
     const t = parseFloat(years) || 0;
     const r = parseFloat(interestRate) / 100 || 0;
     const n = 12;
+    const totalMonths = Math.max(0, Math.round(n * t));
 
-    const compoundFactor = Math.pow(1 + r / n, n * t);
-    const principalWithInterest = P * compoundFactor;
-    let contributionsWithInterest = 0;
-    if (r > 0) {
-      contributionsWithInterest = PMT * ((compoundFactor - 1) / (r / n));
-    } else {
-      contributionsWithInterest = PMT * n * t;
+    // Step the projection forward month-by-month so the chart can render the
+    // curve between integer years (and so partial-year inputs still work).
+    const series: GrowthSeriesPoint[] = [
+      { year: 0, balance: P, contributions: P },
+    ];
+    let balance = P;
+    let contributions = P;
+    const monthlyRate = r / n;
+    const samplesPerYear = 4; // quarterly samples — keeps the path smooth without bloating the SVG
+    const sampleEveryMonths = Math.max(1, Math.round(n / samplesPerYear));
+
+    for (let m = 1; m <= totalMonths; m += 1) {
+      balance = balance * (1 + monthlyRate) + PMT;
+      contributions += PMT;
+      if (m % sampleEveryMonths === 0 || m === totalMonths) {
+        series.push({ year: m / n, balance, contributions });
+      }
     }
 
-    const futureValue = principalWithInterest + contributionsWithInterest;
-    const totalContributions = P + PMT * n * t;
+    const futureValue = balance;
+    const totalContributions = contributions;
     const interestEarned = futureValue - totalContributions;
 
-    setResult({ futureValue, totalContributions, interestEarned });
+    setResult({ futureValue, totalContributions, interestEarned, series });
   };
 
   return (
@@ -152,6 +165,13 @@ const CompoundInterest: React.FC = () => {
                 tone={result.interestEarned >= 0 ? 'gain' : 'loss'}
               />
             </div>
+
+            {result.series.length > 1 && (
+              <div style={{ marginTop: 20 }}>
+                <GrowthChart series={result.series} />
+              </div>
+            )}
+
             <div
               className="mono"
               style={{
@@ -162,7 +182,7 @@ const CompoundInterest: React.FC = () => {
                 borderTop: '1px solid var(--hairline)',
               }}
             >
-              A = P(1+r/n)^(nt) + PMT × ((1+r/n)^(nt) − 1)/(r/n) · n = 12
+              Compounded monthly: balance ← balance × (1 + r/12) + PMT, every month for nt months.
             </div>
           </div>
         )}

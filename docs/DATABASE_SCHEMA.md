@@ -183,6 +183,41 @@ CREATE TABLE watchlist (
 
 ---
 
+### `stock_history`
+
+Persisted daily EOD closes per symbol. Backs the stock-detail price chart so
+repeat loads of the same symbol serve from Postgres rather than burning
+MarketStack quota. Independent of users — the same row is shared by every
+user that views a given symbol's chart.
+
+```sql
+CREATE TABLE stock_history (
+    symbol VARCHAR(10) NOT NULL,
+    trade_date DATE NOT NULL,
+    close NUMERIC(20, 8) NOT NULL,
+    volume BIGINT NOT NULL DEFAULT 0,
+    fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, trade_date)
+);
+```
+
+**Columns**:
+- `symbol` - Stock symbol (uppercased; matches the `util.ValidateSymbol` shape)
+- `trade_date` - The trading day this close belongs to
+- `close` - End-of-day close price; `NUMERIC(20,8)` matches `portfolio.avg_price` so weighted-average math stays exact
+- `volume` - Reported daily share volume; `BIGINT` because high-volume tickers exceed `INTEGER`
+- `fetched_at` - Most recent time the row was upserted (refreshed on conflict)
+
+**Indexes**:
+- `PRIMARY KEY (symbol, trade_date)` — covers all chart range scans (`WHERE symbol = $1 AND trade_date BETWEEN ...`); no secondary index needed.
+
+**Notes**:
+- Written by `MarketService.GetHistoricalSeries` (`backend/internal/service/market.go`) via batched upserts in `data.StockHistoryStore.UpsertMany`, which chunks at `upsertBatchSize = 1000` to stay well under Postgres's 65,535-parameter ceiling.
+- On conflict on `(symbol, trade_date)`, `close` / `volume` / `fetched_at` are refreshed — the latest value always wins.
+- No FK to `users` — this is a shared cache table, not user-owned data. There is no per-user view; every user reading AAPL's chart hits the same rows.
+
+---
+
 ## Redis Keys
 
 Redis is used for caching and rate limiting. All keys follow a consistent naming pattern.
@@ -212,6 +247,24 @@ Redis is used for caching and rate limiting. All keys follow a consistent naming
 **Value**: JSON string containing historical stock data (price, volume, change, etc.) for the requested range
 
 **Purpose**: Caches historical stock data for a full day since it doesn't change once the trading day ends. Keying by both endpoints of the date range lets distinct queries (e.g. 7-day vs 30-day) coexist without colliding.
+
+---
+
+### Empty-Range Negative Cache
+
+**Pattern**: `historical-empty:{symbol}:{from}:{to}`
+
+**Example**: `historical-empty:AAPL:2026-05-02:2026-05-03`
+
+**TTL**: 6 hours
+
+**Value**: Sentinel string `"1"`
+
+**Purpose**: Memoizes `(symbol, range)` combinations that MarketStack returned zero rows for. Without this, every chart load on a Saturday or Sunday would fire a fresh MarketStack call for the same Sat→Sun gap and get the same empty response back, burning quota indefinitely. The 6-hour TTL is short enough that a Tuesday-morning request still picks up Monday's close as soon as MarketStack publishes it.
+
+**Set by**: `MarketService.fillGap` via `RedisHistoricalCache.MarkRangeEmpty` (`backend/internal/service/market.go`).
+
+**Read by**: `MarketService.fillGap` via `RedisHistoricalCache.IsRangeEmpty` — when the marker is present, the gap fetch is skipped.
 
 ---
 
@@ -253,13 +306,14 @@ If `ZCARD` already meets or exceeds the limit, the request is rejected. Redis er
    - `portfolio(user_id, symbol)`
    - `watchlist(user_id, symbol)`
    - `trades(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL` (`idx_trades_user_idempotency_key`)
+   - `stock_history(symbol, trade_date)` — composite primary key
 3. **CHECK Constraints**:
    - `users_balance_non_negative` — `CHECK (balance >= 0)`
 4. **Secondary Indexes**:
    - `idx_trades_user_id_executed_at` on `trades(user_id, executed_at DESC)`
    - `idx_portfolio_user_id` on `portfolio(user_id)`
    - `idx_watchlist_user_id` on `watchlist(user_id)`
-5. **Foreign Keys**: Only `watchlist.user_id` declares `REFERENCES users(id)` (see Relationships).
+5. **Foreign Keys**: Only `watchlist.user_id` declares `REFERENCES users(id)` (see Relationships). `stock_history` has no FK — it is a shared cache table independent of users.
 
 ### Foreign Keys
 
@@ -295,6 +349,8 @@ users (1) ──< (many) trades
   ├──< (many) portfolio
   │
   └──< (many) watchlist
+
+stock_history    (shared cache, no FK to users)
 ```
 
 **Relationships**:
@@ -305,6 +361,7 @@ users (1) ──< (many) trades
 - Each watchlist entry represents one tracked symbol per user
 - Trades are immutable event records (DB-enforced via the `trades_no_update` and `trades_no_delete` triggers)
 - Portfolio is a materialized/aggregated view of trades
+- `stock_history` is **not** related to users — it is a shared symbol/date keyed cache populated by the chart endpoint and read by every user that views the same symbol
 
 ---
 
@@ -398,6 +455,7 @@ Applied migrations to date:
 | 0005 | `stocks` | Created a `stocks` table (subsequently dropped — see 0007) |
 | 0006 | `widen_portfolio_avg_price` | `ALTER ... TYPE NUMERIC(20,8)` for `portfolio.avg_price` |
 | 0007 | `drop_stocks` | `DROP TABLE stocks CASCADE` — the table is no longer used |
+| 0008 | `stock_history` | Create `stock_history(symbol, trade_date, close, volume, fetched_at)` with `PRIMARY KEY (symbol, trade_date)` — backs the persisted chart cache |
 
 ### Production Recommendations
 

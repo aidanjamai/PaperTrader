@@ -230,6 +230,7 @@ func initialize(cfg *config.Config) *appDeps {
 	tradeStore := data.NewTradesStore(db)
 	portfolioStore := data.NewPortfolioStore(db)
 	watchlistStore := data.NewWatchlistStore(db)
+	stockHistoryStore := data.NewStockHistoryStore(db)
 
 	// Initialize JWT service with secret from config
 	jwtService := service.NewJWTService(cfg.JWTSecret)
@@ -257,8 +258,10 @@ func initialize(cfg *config.Config) *appDeps {
 	// Initialize account handler
 	accountHandler := account.NewAccountHandler(authService, cfg)
 
-	// Initialize market service with cache services
-	marketService := service.NewMarketService(cfg.MarketStackKey, stockCache, historicalCache)
+	// Initialize market service with cache services and the persistent
+	// stock_history store (used by GetHistoricalSeries to avoid burning
+	// MarketStack quota on repeat chart loads).
+	marketService := service.NewMarketService(cfg.MarketStackKey, stockCache, historicalCache, stockHistoryStore)
 	// Initialize market handler
 	marketHandler := market.NewStockHandler(marketService)
 

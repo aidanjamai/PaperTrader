@@ -1,5 +1,5 @@
 import React, { useState, FormEvent, ChangeEvent, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiRequest } from '../../services/api';
 import {
   TradeAction,
@@ -32,9 +32,13 @@ const formatQuoteDate = (raw: string): string => {
 
 const Trade: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, refreshUser } = useAuth();
   const [tradeType, setTradeType] = useState<TradeAction>('buy');
-  const [symbol, setSymbol] = useState<string>('');
+  // Allow stock-detail / dashboard links to prefill the symbol via ?symbol=AAPL.
+  const [symbol, setSymbol] = useState<string>(
+    (searchParams.get('symbol') || '').toUpperCase()
+  );
   const [quantity, setQuantity] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<string>('');

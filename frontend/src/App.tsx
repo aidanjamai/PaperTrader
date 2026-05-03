@@ -13,6 +13,7 @@ import History from './components/trading/History';
 import Markets from './components/trading/Markets';
 import Calculator from './components/tools/Calculator';
 import CompoundInterest from './components/tools/CompoundInterest';
+import Stock from './components/common/Stock';
 import { useAuth } from './hooks/useAuth';
 import { ThemeProvider } from './hooks/useTheme';
 import './App.css';
@@ -111,6 +112,16 @@ const App: React.FC = () => {
                   />
                   <Route path="/calculator" element={<Calculator />} />
                   <Route path="/compound-interest" element={<CompoundInterest />} />
+                  <Route
+                    path="/stock/:symbol"
+                    element={
+                      isAuthenticated && user ? (
+                        <Stock />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
                 </Routes>
             </main>
           </div>

@@ -145,6 +145,25 @@ export interface HistoricalDataResponse {
 }
 
 /**
+ * A single point in a stock-history time series.
+ * date is ISO YYYY-MM-DD; close is in dollars (2dp on the wire).
+ */
+export interface HistoricalSeriesPoint {
+  date: string;
+  close: number;
+}
+
+/**
+ * Response shape from GET /market/stock/historical/series.
+ */
+export interface HistoricalSeriesResponse {
+  symbol: string;
+  from: string;
+  to: string;
+  points: HistoricalSeriesPoint[];
+}
+
+/**
  * A single watchlist entry as returned by GET /watchlist.
  * has_price is false when the price lookup failed (treat price/change as unknown).
  */
