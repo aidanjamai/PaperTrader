@@ -1114,6 +1114,9 @@ table.holdings th.num {
   font-feature-settings: "tnum" 1;
 }
 
+table.holdings td.gain-text { color: var(--gain); }
+table.holdings td.loss-text { color: var(--loss); }
+
 table.holdings tbody tr:hover td {
   background: var(--row-tint);
 }

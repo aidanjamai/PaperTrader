@@ -426,7 +426,8 @@ const StockTable: React.FC<{
     </thead>
     <tbody>
       {rows.map((s) => {
-        const tone = s.change > 0 ? 'gain-text' : s.change < 0 ? 'loss-text' : '';
+        const pillTone: 'gain' | 'loss' | null =
+          s.change > 0 ? 'gain' : s.change < 0 ? 'loss' : null;
         return (
           <tr
             key={s.symbol}
@@ -451,8 +452,20 @@ const StockTable: React.FC<{
               </div>
             </td>
             <td className="num">${formatMoney(s.price)}</td>
-            <td className={`num ${tone}`}>{formatSignedMoney(s.change)}</td>
-            <td className={`num ${tone}`}>{formatPercent(s.changePercentage)}</td>
+            <td className="num">
+              {pillTone ? (
+                <span className={`pill pill-${pillTone}`}>{formatSignedMoney(s.change)}</span>
+              ) : (
+                formatSignedMoney(s.change)
+              )}
+            </td>
+            <td className="num">
+              {pillTone ? (
+                <span className={`pill pill-${pillTone}`}>{formatPercent(s.changePercentage)}</span>
+              ) : (
+                formatPercent(s.changePercentage)
+              )}
+            </td>
           </tr>
         );
       })}

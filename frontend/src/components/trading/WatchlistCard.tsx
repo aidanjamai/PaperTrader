@@ -204,12 +204,13 @@ const WatchlistCard: React.FC = () => {
           </thead>
           <tbody>
             {items.map((entry) => {
-              const tone =
-                entry.has_price && entry.change > 0
-                  ? 'gain-text'
-                  : entry.has_price && entry.change < 0
-                  ? 'loss-text'
-                  : '';
+              const pillTone: 'gain' | 'loss' | null = entry.has_price
+                ? entry.change > 0
+                  ? 'gain'
+                  : entry.change < 0
+                  ? 'loss'
+                  : null
+                : null;
               const removing = pendingRemove === entry.symbol;
               return (
                 <tr key={entry.id}>
@@ -224,11 +225,27 @@ const WatchlistCard: React.FC = () => {
                   <td className="num">
                     {entry.has_price ? formatMoney(entry.price) : '—'}
                   </td>
-                  <td className={`num ${tone}`}>
-                    {entry.has_price ? formatSignedMoney(entry.change) : '—'}
+                  <td className="num">
+                    {!entry.has_price
+                      ? '—'
+                      : pillTone
+                      ? (
+                        <span className={`pill pill-${pillTone}`}>
+                          {formatSignedMoney(entry.change)}
+                        </span>
+                      )
+                      : formatSignedMoney(entry.change)}
                   </td>
-                  <td className={`num ${tone}`}>
-                    {entry.has_price ? formatPercent(entry.change_percentage) : '—'}
+                  <td className="num">
+                    {!entry.has_price
+                      ? '—'
+                      : pillTone
+                      ? (
+                        <span className={`pill pill-${pillTone}`}>
+                          {formatPercent(entry.change_percentage)}
+                        </span>
+                      )
+                      : formatPercent(entry.change_percentage)}
                   </td>
                   <td className="num">
                     <button

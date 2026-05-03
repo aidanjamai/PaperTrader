@@ -225,7 +225,8 @@ const Dashboard: React.FC = () => {
             </thead>
             <tbody>
               {filtered.map((s: UserStock & { value: number; pnl: number; pnlPct: number }) => {
-                const tone = s.pnl > 0 ? 'gain-text' : s.pnl < 0 ? 'loss-text' : '';
+                const pillTone: 'gain' | 'loss' | null =
+                  s.pnl > 0 ? 'gain' : s.pnl < 0 ? 'loss' : null;
                 return (
                   <tr key={s.symbol}>
                     <td>
@@ -243,8 +244,20 @@ const Dashboard: React.FC = () => {
                     <td className="num">{formatMoney(s.avg_price)}</td>
                     <td className="num">{formatMoney(s.current_stock_price)}</td>
                     <td className="num">{formatMoney(s.value)}</td>
-                    <td className={`num ${tone}`}>{formatSignedMoney(s.pnl)}</td>
-                    <td className={`num ${tone}`}>{formatPercent(s.pnlPct)}</td>
+                    <td className="num">
+                      {pillTone ? (
+                        <span className={`pill pill-${pillTone}`}>{formatSignedMoney(s.pnl)}</span>
+                      ) : (
+                        formatSignedMoney(s.pnl)
+                      )}
+                    </td>
+                    <td className="num">
+                      {pillTone ? (
+                        <span className={`pill pill-${pillTone}`}>{formatPercent(s.pnlPct)}</span>
+                      ) : (
+                        formatPercent(s.pnlPct)
+                      )}
+                    </td>
                   </tr>
                 );
               })}
