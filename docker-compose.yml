@@ -53,6 +53,7 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY}
       - FROM_EMAIL=${FROM_EMAIL}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - MIGRATE_ON_START=${MIGRATE_ON_START:-true}
     depends_on:
       postgres:
         condition: service_healthy
