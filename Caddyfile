@@ -17,6 +17,11 @@ http://paper-trader.net {
     redir https://paper-trader.net{uri} permanent
 }
 
+# Redirect www → apex (both http and https)
+www.paper-trader.net {
+    redir https://paper-trader.net{uri} permanent
+}
+
 paper-trader.net {
     # Security headers
     header {
