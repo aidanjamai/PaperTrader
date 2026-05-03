@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"papertrader/internal/service"
@@ -20,6 +21,7 @@ type MarketServicer interface {
 	GetStock(ctx context.Context, symbol string) (*service.StockData, error)
 	GetHistoricalData(ctx context.Context, symbol string) (*service.HistoricalData, error)
 	GetBatchHistoricalData(ctx context.Context, symbols []string) (map[string]*service.HistoricalData, error)
+	GetHistoricalSeries(ctx context.Context, symbol string, days int) (*service.HistoricalSeries, error)
 }
 
 type StockHandler struct {
@@ -81,6 +83,31 @@ func (h *StockHandler) GetStockHistoricalDataDaily(w http.ResponseWriter, r *htt
 	}
 
 	h.writeSuccessResponse(w, http.StatusOK, "Historical stock data retrieved successfully", data)
+}
+
+// GetStockHistoricalSeries returns a daily-close time series for one symbol.
+// Reads ?symbol= and an optional ?days= (default 90, clamped to MaxHistoricalSeriesDays).
+func (h *StockHandler) GetStockHistoricalSeries(w http.ResponseWriter, r *http.Request) {
+	symbol := r.URL.Query().Get("symbol")
+	days := 0
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			h.writeErrorResponse(w, http.StatusBadRequest, "days must be a positive integer")
+			return
+		}
+		days = parsed
+	}
+
+	data, err := h.service.GetHistoricalSeries(r.Context(), symbol, days)
+	if err != nil {
+		slog.Warn("GetStockHistoricalSeries failed", "symbol", symbol, "days", days, "err", err)
+		userMessage, statusCode, _ := util.MapServiceError(err)
+		h.writeErrorResponse(w, statusCode, userMessage)
+		return
+	}
+
+	h.writeSuccessResponse(w, http.StatusOK, "Historical series retrieved", data)
 }
 
 // GetBatchHistoricalDataDaily handles batch requests for multiple stock symbols

@@ -11,9 +11,15 @@ import (
 )
 
 // HistoricalCache interface defines methods for caching historical stock data
+// and for marking date ranges that returned zero rows from the upstream API.
+// IsRangeEmpty / MarkRangeEmpty exist so weekend/holiday gap-fill calls don't
+// burn MarketStack quota every time the chart is loaded — once we've seen an
+// empty result for a range, we skip refetching it until the marker expires.
 type HistoricalCache interface {
 	GetHistorical(ctx context.Context, symbol, startDate, endDate string) (*HistoricalData, error)
 	SetHistorical(ctx context.Context, symbol, startDate, endDate string, data *HistoricalData, ttl time.Duration) error
+	IsRangeEmpty(ctx context.Context, symbol, startDate, endDate string) (bool, error)
+	MarkRangeEmpty(ctx context.Context, symbol, startDate, endDate string, ttl time.Duration) error
 }
 
 // RedisHistoricalCache implements HistoricalCache using Redis
@@ -64,6 +70,43 @@ func (c *RedisHistoricalCache) GetHistorical(ctx context.Context, symbol, startD
 	}
 
 	return &historicalData, nil
+}
+
+// IsRangeEmpty reports whether a recent fetch for this range returned zero
+// rows and is still considered fresh enough to skip. Returns false for cache
+// miss or any Redis error — both interpreted as "not known empty, go fetch".
+func (c *RedisHistoricalCache) IsRangeEmpty(ctx context.Context, symbol, startDate, endDate string) (bool, error) {
+	key := fmt.Sprintf("historical-empty:%s:%s:%s", symbol, startDate, endDate)
+	_, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		slog.Error("Redis error checking empty marker",
+			"symbol", symbol, "start_date", startDate, "end_date", endDate, "err", err,
+			"component", "historical_cache",
+		)
+		return false, nil
+	}
+	return true, nil
+}
+
+// MarkRangeEmpty records that a fetch for this range returned no rows, so we
+// can skip re-fetching it for a while. Errors are logged but not surfaced —
+// the worst-case fallback is just one wasted API call next time.
+func (c *RedisHistoricalCache) MarkRangeEmpty(ctx context.Context, symbol, startDate, endDate string, ttl time.Duration) error {
+	if ttl == 0 {
+		ttl = 6 * time.Hour
+	}
+	key := fmt.Sprintf("historical-empty:%s:%s:%s", symbol, startDate, endDate)
+	if err := c.client.Set(ctx, key, "1", ttl).Err(); err != nil {
+		slog.Error("failed to mark range empty",
+			"symbol", symbol, "start_date", startDate, "end_date", endDate, "err", err,
+			"component", "historical_cache",
+		)
+		return err
+	}
+	return nil
 }
 
 // SetHistorical stores historical data in Redis cache with TTL

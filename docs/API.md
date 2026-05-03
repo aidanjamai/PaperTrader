@@ -630,6 +630,55 @@ watchlist.
   - `400 Bad Request` - missing `symbols`, no symbols parsed, or more than 15
   - `500 Internal Server Error` - upstream API failure
 
+#### Get Stock Price Series
+
+**GET** `/api/market/stock/historical/series?symbol=AAPL&days=90`
+
+Return a daily-close time series for one symbol over the requested window.
+Reads from the local `stock_history` table whenever possible; only the gap
+between the latest stored row and yesterday is fetched from MarketStack, so
+repeat loads on the same symbol cost zero upstream API quota.
+
+- **Headers**: Authorization required
+- **Query Parameters**:
+  - `symbol` (required) — Stock symbol
+  - `days` (optional integer, default 90) — Lookback window in calendar days.
+    Clamped to `[7, 365]`.
+
+- **Response** (200 OK):
+  ```json
+  {
+    "success": true,
+    "message": "Historical series retrieved",
+    "data": {
+      "symbol": "AAPL",
+      "from": "2024-10-04",
+      "to": "2025-01-01",
+      "points": [
+        { "date": "2024-10-04", "close": 226.78 },
+        { "date": "2024-10-07", "close": 221.69 }
+      ]
+    }
+  }
+  ```
+
+- **Error Responses**:
+  - `400 Bad Request` — Invalid symbol or non-positive `days`
+  - `404 Not Found` (`INSUFFICIENT_DATA`) — No historical data for this symbol
+  - `429 Too Many Requests` — Rate limit exceeded
+  - `500 Internal Server Error` — Upstream API failure
+
+- **Notes**:
+  - Persists fetched closes to `stock_history(symbol, trade_date, close, volume)`
+    so subsequent loads serve from Postgres.
+  - The Redis 24-hour cache used by `GetHistoricalData` is **not** consulted by
+    this endpoint — the DB is the primary cache.
+  - When MarketStack returns zero rows for a gap window (typically a weekend or
+    holiday), the `(symbol, from, to)` triple is memoized in Redis under
+    `historical-empty:{symbol}:{from}:{to}` with a 6-hour TTL. Subsequent
+    requests for the same gap skip the upstream call until the marker expires,
+    so chart loads on Saturday and Sunday don't burn MarketStack quota.
+
 #### Add Stock to Database
 
 **POST** `/api/market/stock`

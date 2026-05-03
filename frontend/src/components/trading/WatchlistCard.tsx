@@ -1,4 +1,5 @@
 import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useWatchlist } from '../../hooks/useWatchlist';
 import { formatMoney, formatPercent, formatSignedMoney } from '../primitives/format';
 
@@ -130,6 +131,7 @@ const AddWatchlistModal: React.FC<AddWatchlistModalProps> = ({ isOpen, onClose, 
 
 const WatchlistCard: React.FC = () => {
   const { items, loading, error, fetchWatchlist, addSymbol, removeSymbol } = useWatchlist();
+  const navigate = useNavigate();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -212,8 +214,23 @@ const WatchlistCard: React.FC = () => {
                   : null
                 : null;
               const removing = pendingRemove === entry.symbol;
+              const goToDetail = () => navigate(`/stock/${encodeURIComponent(entry.symbol)}`);
               return (
-                <tr key={entry.id}>
+                <tr
+                  key={entry.id}
+                  onClick={goToDetail}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      goToDetail();
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${entry.symbol} detail`}
+                  style={{ cursor: 'pointer' }}
+                  title={`Open ${entry.symbol} detail`}
+                >
                   <td>
                     <div className="ticker">
                       <span className="mark" aria-hidden="true">
@@ -251,7 +268,10 @@ const WatchlistCard: React.FC = () => {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={() => handleRemove(entry.symbol)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemove(entry.symbol);
+                      }}
                       disabled={removing}
                       aria-label={`Remove ${entry.symbol} from watchlist`}
                       style={{ padding: '4px 10px', fontSize: 12 }}
