@@ -67,29 +67,43 @@ graph TB
         Router[Gorilla Mux Router<br/>/api/*]
     end
 
-    subgraph "Middleware Layer"
+    subgraph "Middleware Layer (Global, in order)"
+        ReqLogger[RequestLogger<br/>Attaches request_id]
+        Recover[Recover<br/>Panic handler]
+        StripHdr[StripUserHeaders<br/>Strip forgable identity headers]
         CORS[CORS Middleware]
-        JWT[JWT Auth Middleware]
-        RateLimit[Rate Limit Middleware<br/>Redis-based]
+        OriginCheck[OriginCheck<br/>CSRF defence]
+        SizeLimit[RequestSizeLimit]
+        Timeout[RequestTimeout]
+    end
+
+    subgraph "Per-Route Middleware"
+        JWT[JWT Auth Middleware<br/>Protected routes only]
+        RateLimit[Rate Limit Middleware<br/>Redis sliding window<br/>Auth + Market + Watchlist POST]
     end
 
     subgraph "API Handlers Layer"
-        AccountHandler[Account Handler<br/>Registration, Login, Profile]
+        AccountHandler[Account Handler<br/>Registration, Login, Profile<br/>Google OAuth, Email Verify]
         MarketHandler[Market Handler<br/>Stock Queries]
-        InvestmentHandler[Investment Handler<br/>Buy/Sell Operations]
+        InvestmentHandler[Investment Handler<br/>Buy/Sell, History]
+        WatchlistHandler[Watchlist Handler<br/>List/Add/Remove]
     end
 
     subgraph "Business Logic Layer (Services)"
         AuthService[Auth Service<br/>User Management<br/>JWT Generation]
+        GoogleOAuthService[Google OAuth Service<br/>ID Token Verification]
+        EmailService[Email Service<br/>Resend API]
         MarketService[Market Service<br/>Stock Data<br/>Cache Management]
-        InvestmentService[Investment Service<br/>Trade Execution<br/>ACID Transactions]
+        InvestmentService[Investment Service<br/>Trade Execution<br/>ACID Transactions<br/>Idempotency Keys]
+        WatchlistService[Watchlist Service]
         JWTService[JWT Service<br/>Token Validation]
     end
 
     subgraph "Data Access Layer (Stores)"
         UserStore[User Store<br/>CRUD Operations]
-        TradeStore[Trade Store<br/>Trade Records]
+        TradeStore[Trade Store<br/>Append-only Trade Records]
         PortfolioStore[Portfolio Store<br/>Holdings Management]
+        WatchlistStore[Watchlist Store]
         StockCache[Stock Cache Interface<br/>Redis Implementation]
         HistoricalCache[Historical Cache Interface<br/>Redis Implementation]
     end
@@ -101,29 +115,44 @@ graph TB
 
     Browser --> Caddy
     Caddy --> Router
-    Router --> CORS
-    CORS --> JWT
+    Router --> ReqLogger
+    ReqLogger --> Recover
+    Recover --> StripHdr
+    StripHdr --> CORS
+    CORS --> OriginCheck
+    OriginCheck --> SizeLimit
+    SizeLimit --> Timeout
+    Timeout --> JWT
     JWT --> RateLimit
     RateLimit --> AccountHandler
     RateLimit --> MarketHandler
     RateLimit --> InvestmentHandler
+    RateLimit --> WatchlistHandler
 
     AccountHandler --> AuthService
+    AccountHandler --> GoogleOAuthService
+    AuthService --> EmailService
     MarketHandler --> MarketService
     InvestmentHandler --> InvestmentService
+    WatchlistHandler --> WatchlistService
 
     AuthService --> JWTService
     AuthService --> UserStore
+    GoogleOAuthService --> UserStore
+    GoogleOAuthService --> JWTService
     MarketService --> StockCache
     MarketService --> HistoricalCache
     InvestmentService --> MarketService
     InvestmentService --> UserStore
     InvestmentService --> TradeStore
     InvestmentService --> PortfolioStore
+    WatchlistService --> WatchlistStore
+    WatchlistService --> MarketService
 
     UserStore --> PostgreSQL
     TradeStore --> PostgreSQL
     PortfolioStore --> PostgreSQL
+    WatchlistStore --> PostgreSQL
     StockCache --> Redis
     HistoricalCache --> Redis
 
@@ -139,15 +168,21 @@ graph TB
 erDiagram
     USERS ||--o{ TRADES : "has"
     USERS ||--o{ PORTFOLIO : "owns"
-    
+    USERS ||--o{ WATCHLIST : "watches"
+
     USERS {
         VARCHAR id PK "UUID"
         VARCHAR email UK "Unique"
-        TEXT password "Bcrypt Hash"
+        TEXT password "Bcrypt Hash, NULLABLE (Google users)"
         TIMESTAMP created_at
-        NUMERIC balance "Default: 10000.00"
+        NUMERIC balance "Default: 10000.00, CHECK >= 0"
+        BOOLEAN email_verified "Default: false"
+        VARCHAR verification_token "Email verification token"
+        TIMESTAMP verification_token_expires
+        VARCHAR google_id UK "Google OAuth subject id"
+        VARCHAR created_via "email | google"
     }
-    
+
     TRADES {
         VARCHAR id PK "UUID"
         VARCHAR user_id FK
@@ -155,43 +190,57 @@ erDiagram
         VARCHAR action "BUY/SELL"
         INTEGER quantity
         NUMERIC price
-        VARCHAR date
+        TIMESTAMPTZ executed_at "NOT NULL, default now()"
         VARCHAR status "PENDING/COMPLETED/FAILED"
+        VARCHAR idempotency_key "Unique per user when set"
     }
-    
+
     PORTFOLIO {
         VARCHAR id PK "UUID"
         VARCHAR user_id FK
         VARCHAR symbol
         INTEGER quantity
-        NUMERIC avg_price
+        NUMERIC avg_price "NUMERIC(20,8), widened for fractional pricing"
         TIMESTAMP created_at
         TIMESTAMP updated_at
         UNIQUE user_id_symbol "UNIQUE(user_id, symbol)"
     }
 
-    USERS ||--o{ TRADES : creates
-    USERS ||--o{ PORTFOLIO : holds
+    WATCHLIST {
+        VARCHAR id PK "UUID"
+        VARCHAR user_id FK "REFERENCES users(id)"
+        VARCHAR symbol
+        TIMESTAMP created_at
+        UNIQUE user_id_symbol "UNIQUE(user_id, symbol)"
+    }
 ```
 
 ### Table Details
 
 #### users
-- **Purpose**: User accounts and authentication
+- **Purpose**: User accounts and authentication (email/password and Google OAuth)
 - **Key Fields**:
   - `id`: UUID primary key
   - `email`: Unique email address
-  - `password`: Bcrypt hashed password (cost factor 12)
-  - `balance`: Starting balance $10,000.00
+  - `password`: Bcrypt hashed password (cost factor 12). **Nullable** — null for Google-OAuth-only accounts.
+  - `balance`: Starting balance $10,000.00 (CHECK constraint `balance >= 0`)
+  - `email_verified`: Whether the user has confirmed their email (default `false`)
+  - `verification_token` / `verification_token_expires`: Token issued for email verification flow
+  - `google_id`: Unique Google subject id for OAuth-linked accounts
+  - `created_via`: `email` or `google` — how the account was provisioned
 
 #### trades
-- **Purpose**: Audit log of all buy/sell transactions
+- **Purpose**: Append-only audit log of all buy/sell transactions
 - **Key Fields**:
   - `id`: UUID primary key
   - `user_id`: Foreign key to users
   - `symbol`: Stock symbol (e.g., "AAPL")
   - `action`: "BUY" or "SELL"
+  - `executed_at`: TIMESTAMPTZ, NOT NULL, defaults to `CURRENT_TIMESTAMP` (replaces the legacy `date VARCHAR` column)
   - `status`: Transaction status
+  - `idempotency_key`: Optional client-supplied key; unique per `user_id` (partial unique index) so retried buy/sell requests don't double-execute
+- **Triggers**: `BEFORE UPDATE` and `BEFORE DELETE` triggers raise an exception — the table is enforced as append-only at the database level.
+- **Indexes**: `(user_id, executed_at DESC)` for trade history queries.
 
 #### portfolio
 - **Purpose**: Current holdings per user
@@ -200,8 +249,18 @@ erDiagram
   - `user_id`: Foreign key to users
   - `symbol`: Stock symbol
   - `quantity`: Number of shares
-  - `avg_price`: Weighted average purchase price
+  - `avg_price`: Weighted average purchase price, `NUMERIC(20,8)` (widened from `NUMERIC(15,2)` to support fractional pricing)
   - Unique constraint on (user_id, symbol)
+
+#### watchlist
+- **Purpose**: Per-user list of symbols the user is tracking (independent of holdings)
+- **Key Fields**:
+  - `id`: UUID primary key
+  - `user_id`: Foreign key to `users(id)`
+  - `symbol`: Stock symbol
+  - `created_at`: When the symbol was added
+  - Unique constraint on (user_id, symbol)
+- **Indexes**: `idx_watchlist_user_id` on `user_id` for fast list lookups.
 
 ---
 
@@ -209,9 +268,17 @@ erDiagram
 
 ```mermaid
 graph LR
-    subgraph "Public Endpoints"
+    subgraph "Health (Public)"
+        Health[GET /health]
+        ApiHealth[GET /api/health]
+    end
+
+    subgraph "Public Endpoints (Rate Limited)"
         Register[POST /api/account/register]
         Login[POST /api/account/login]
+        GoogleLogin[POST /api/account/auth/google]
+        VerifyEmail[GET /api/account/verify-email]
+        ResendVerify[POST /api/account/resend-verification]
     end
 
     subgraph "Protected Endpoints - Account"
@@ -219,61 +286,87 @@ graph LR
         Profile[GET /api/account/profile]
         AuthCheck[GET /api/account/auth]
         Balance[GET /api/account/balance]
-        UpdateBalance[POST /api/account/update-balance]
-        AllUsers[GET /api/account/users]
     end
 
-    subgraph "Protected Endpoints - Market"
+    subgraph "Protected Endpoints - Market (JWT + Rate Limit)"
         GetStock[GET /api/market/stock?symbol=AAPL]
         Historical[GET /api/market/stock/historical/daily?symbol=AAPL]
+        BatchHistorical[GET /api/market/stock/historical/daily/batch<br/>JWT only — excluded from rate limit]
         PostStock[POST /api/market/stock]
-        DeleteStock[DELETE /api/market/stock/symbol?symbol=AAPL]
+        DeleteStock[DELETE /api/market/stock/symbol<br/>symbol in JSON body]
     end
 
     subgraph "Protected Endpoints - Investments"
         BuyStock[POST /api/investments/buy]
         SellStock[POST /api/investments/sell]
         GetStocks[GET /api/investments]
+        TradeHistory[GET /api/investments/history]
     end
 
-    Register --> JWT
-    Login --> JWT
+    subgraph "Protected Endpoints - Watchlist"
+        ListWatch[GET /api/watchlist]
+        AddWatch[POST /api/watchlist<br/>Rate Limited]
+        RemoveWatch["DELETE /api/watchlist/{symbol}"]
+    end
+
+    Register --> RL
+    Login --> RL
+    GoogleLogin --> RL
+    VerifyEmail --> RL
+    ResendVerify --> RL
     Logout --> JWT
     Profile --> JWT
     AuthCheck --> JWT
     Balance --> JWT
-    UpdateBalance --> JWT
-    AllUsers --> JWT
     GetStock --> JWT
     Historical --> JWT
+    BatchHistorical --> JWT
     PostStock --> JWT
     DeleteStock --> JWT
     BuyStock --> JWT
     SellStock --> JWT
     GetStocks --> JWT
+    TradeHistory --> JWT
+    ListWatch --> JWT
+    AddWatch --> JWT
+    RemoveWatch --> JWT
 
     JWT[JWT Middleware<br/>Validates Token<br/>Sets X-User-ID Header]
+    RL[Rate Limit Middleware<br/>Sliding window via Redis]
 ```
 
 ### API Endpoint Summary
 
 | Method | Endpoint | Authentication | Description |
 |--------|----------|----------------|-------------|
-| POST | `/api/account/register` | None | User registration |
-| POST | `/api/account/login` | None | User login (returns JWT) |
+| GET | `/health` | None | Liveness/readiness probe (DB + Redis ping) |
+| GET | `/api/health` | None | Same probe under the `/api` prefix for the frontend |
+| POST | `/api/account/register` | Rate Limit | User registration |
+| POST | `/api/account/login` | Rate Limit | User login (returns JWT cookie) |
+| POST | `/api/account/auth/google` | Rate Limit | Sign in / sign up via Google ID token |
+| GET | `/api/account/verify-email` | Rate Limit | Confirm email via token query param |
+| POST | `/api/account/resend-verification` | Rate Limit | Resend verification email |
 | POST | `/api/account/logout` | JWT | User logout |
 | GET | `/api/account/profile` | JWT | Get user profile |
 | GET | `/api/account/auth` | JWT | Check authentication status |
 | GET | `/api/account/balance` | JWT | Get user balance |
-| POST | `/api/account/update-balance` | JWT | Update user balance |
-| GET | `/api/account/users` | JWT | Get all users (admin) |
-| GET | `/api/market/stock` | JWT + Rate Limit | Get current stock price |
+| GET | `/api/market/stock` | JWT + Rate Limit | Get current stock price (`?symbol=AAPL`) |
 | GET | `/api/market/stock/historical/daily` | JWT + Rate Limit | Get historical stock data |
-| POST | `/api/market/stock` | JWT + Rate Limit | Create stock entry |
-| DELETE | `/api/market/stock/symbol` | JWT + Rate Limit | Delete stock by symbol |
+| GET | `/api/market/stock/historical/daily/batch` | JWT (no rate limit) | Batched historical fetch — excluded from rate limiting because it reduces total MarketStack calls |
+| POST | `/api/market/stock` | JWT + Rate Limit | Create / refresh stock cache entry |
+| DELETE | `/api/market/stock/symbol` | JWT + Rate Limit | Invalidate cached stock; **symbol provided in JSON request body** (path is literal `/stock/symbol`) |
 | POST | `/api/investments/buy` | JWT | Buy stock shares |
 | POST | `/api/investments/sell` | JWT | Sell stock shares |
 | GET | `/api/investments` | JWT | Get user portfolio holdings |
+| GET | `/api/investments/history` | JWT | Get user trade history (append-only ledger) |
+| GET | `/api/watchlist` | JWT | List watched symbols |
+| POST | `/api/watchlist` | JWT + Rate Limit | Add a symbol (rate-limited because it calls MarketStack) |
+| DELETE | `/api/watchlist/{symbol}` | JWT | Remove a symbol from the watchlist |
+
+> **Rate limiting notes**
+> - The public auth endpoints (`/register`, `/login`, `/auth/google`, `/verify-email`, `/resend-verification`) are rate-limited even though they don't require a JWT, to deter brute-force and abuse.
+> - All `/api/market/*` routes are rate-limited **except** `/stock/historical/daily/batch`, which is intentionally exempt (`backend/internal/api/market/routes.go:23-34`) because batching reduces upstream API calls.
+> - On the watchlist, only `POST` is rate-limited (it calls MarketStack); `GET` and `DELETE` are DB-only and exempt.
 
 ---
 
@@ -425,18 +518,24 @@ sequenceDiagram
 ## Technology Stack
 
 ### Frontend
-- **Framework**: React (JavaScript)
-- **HTTP Client**: Fetch API / Axios
-- **Routing**: React Router (implied)
-- **Build Tool**: Create React App / npm
+- **Framework**: React 18 (TypeScript)
+- **HTTP Client**: Fetch API
+- **Routing**: React Router v6
+- **Google OAuth**: `@react-oauth/google`
+- **Build Tool**: Create React App (react-scripts) / npm
+- **Type Checking**: TypeScript 5.9 (`tsc --noEmit`)
 
 ### Backend
-- **Language**: Go 1.23
+- **Language**: Go 1.25.0
 - **HTTP Framework**: Gorilla Mux
 - **Database Driver**: lib/pq (PostgreSQL)
+- **Migrations**: golang-migrate/migrate/v4 (embedded SQL migrations runner)
 - **Cache/Queue**: go-redis/v9
 - **Authentication**: JWT (golang-jwt/jwt/v5)
+- **Google OAuth**: `google.golang.org/api` (ID token verification)
+- **Email**: `resend-go/v2` (Resend API for verification emails)
 - **Password Hashing**: golang.org/x/crypto/bcrypt
+- **Decimal Math**: shopspring/decimal (for monetary values)
 
 ### Infrastructure
 - **Reverse Proxy**: Caddy 2
@@ -494,7 +593,7 @@ sequenceDiagram
 - Redis in-memory storage provides sub-millisecond response times
 
 ### Database
-- PostgreSQL connection pooling (25 max connections, 5 idle)
+- PostgreSQL connection pooling (10 max connections, 5 idle — sized to PostgreSQL `max_connections=50` on the e2-micro deployment)
 - Indexed queries on `user_id` in portfolio and trades tables
 - Unique constraint on `(user_id, symbol)` in portfolio for fast lookups
 
@@ -544,5 +643,5 @@ sequenceDiagram
 
 ---
 
-*Last Updated: After PostgreSQL Migration*  
-*Architecture Version: 2.0 (PostgreSQL + Redis)*
+*Last Updated: 2026-05-03*
+*Architecture Version: 2.1 — adds watchlist, Google OAuth, email verification, idempotency keys on trades, and append-only trade triggers*

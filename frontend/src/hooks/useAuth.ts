@@ -187,8 +187,15 @@ export const useAuth = (): UseAuthReturn => {
         notifyListeners();
       } finally {
         globalAuthState.loading = false;
+        // Null out the promise BEFORE notifying. notifyListeners() can trigger
+        // synchronous re-renders in subscribed components, and any of them may
+        // call checkAuth() during that render. If checkPromise still pointed
+        // at this (about-to-resolve) promise, that re-entrant caller would
+        // await an already-settled promise instead of starting a fresh check —
+        // benign today, but a foot-gun once any caller relies on the promise
+        // representing an *in-flight* request.
         globalAuthState.checkPromise = null;
-        
+
         // Notify all listeners of loading state change
         notifyListeners();
       }
@@ -266,8 +273,6 @@ export const useAuth = (): UseAuthReturn => {
     } catch (error) {
       console.error('[useAuth] Logout failed', error);
     } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
       localStorage.removeItem(AUTH_CACHE_KEY);
       localStorage.removeItem(AUTH_TIMESTAMP_KEY);
       

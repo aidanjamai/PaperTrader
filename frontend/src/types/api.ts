@@ -90,7 +90,36 @@ export interface TradeResponse {
   action: string;
   quantity: number;
   price: number;
-  date: string;
+  total: number;
+  executed_at: string;
+}
+
+/**
+ * A single trade row as returned by GET /investments/history.
+ * total is computed server-side as quantity * price.
+ * executed_at is an ISO 8601 timestamp.
+ */
+export interface Trade {
+  id: string;
+  user_id: string;
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+  total: number;
+  executed_at: string;
+  status: string;
+}
+
+/**
+ * Paginated response from GET /investments/history.
+ * total is the count of all trades matching the filter — independent of limit/offset.
+ */
+export interface TradeHistoryResponse {
+  trades: Trade[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /**
@@ -116,16 +145,20 @@ export interface HistoricalDataResponse {
 }
 
 /**
- * Update balance request payload
+ * A single watchlist entry as returned by GET /watchlist.
+ * has_price is false when the price lookup failed (treat price/change as unknown).
  */
-export interface UpdateBalanceRequest {
-  balance: number;
+export interface WatchlistEntry {
+  id: string;
+  symbol: string;
+  created_at: string;
+  price: number;
+  change: number;
+  change_percentage: number;
+  has_price: boolean;
 }
 
-/**
- * Get all users response
- */
-export interface GetAllUsersResponse {
-  users: User[];
+export interface WatchlistResponse {
+  items: WatchlistEntry[];
 }
 

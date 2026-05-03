@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/mail"
 	"papertrader/internal/data"
-	"papertrader/internal/util"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,7 +29,7 @@ func NewAuthService(users *data.UserStore, jwtService *JWTService, emailService 
 }
 
 // Register registers a new user
-func (s *AuthService) Register(email, password string) (*data.User, string, error) {
+func (s *AuthService) Register(ctx context.Context, email, password string) (*data.User, string, error) {
 	// Validate email
 	_, err := mail.ParseAddress(email)
 	if err != nil {
@@ -43,13 +42,13 @@ func (s *AuthService) Register(email, password string) (*data.User, string, erro
 	}
 
 	// Check if email already exists
-	_, err = s.users.GetUserByEmail(email)
+	_, err = s.users.GetUserByEmail(ctx, email)
 	if err == nil {
 		return nil, "", &EmailExistsError{}
 	}
 
 	// Create user with verification token
-	user, verificationToken, err := s.users.CreateUserWithVerification(email, password)
+	user, verificationToken, err := s.users.CreateUserWithVerification(ctx, email, password)
 	if err != nil {
 		return nil, "", err
 	}
@@ -58,7 +57,7 @@ func (s *AuthService) Register(email, password string) (*data.User, string, erro
 	if s.emailService != nil {
 		if err := s.emailService.SendVerificationEmail(user.Email, verificationToken); err != nil {
 			// Log error but don't fail registration
-			log.Printf("Failed to send verification email: %v", err)
+			slog.Warn("send verification email failed", "err", err)
 		}
 	}
 
@@ -72,51 +71,70 @@ func (s *AuthService) Register(email, password string) (*data.User, string, erro
 }
 
 // VerifyEmail verifies a user's email using the verification token
-func (s *AuthService) VerifyEmail(token string) error {
-	return s.users.VerifyEmail(token)
+func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
+	return s.users.VerifyEmail(ctx, token)
 }
 
-// ResendVerificationEmail sends a new verification email to the user
-func (s *AuthService) ResendVerificationEmail(email string) error {
-	user, err := s.users.GetUserByEmail(email)
+// ResendVerificationEmail sends a new verification email to the user.
+//
+// The response is intentionally identical for "no such email", "email already
+// verified", and "email sent" so an attacker cannot enumerate registered
+// addresses by probing this endpoint. Failures are logged server-side.
+func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
+	user, err := s.users.GetUserByEmail(ctx, email)
 	if err != nil {
-		return errors.New("user not found")
+		slog.Info("resend verification: no account for email (silently ignored)", "email", email)
+		return nil
 	}
 
 	if user.EmailVerified {
-		return errors.New("email already verified")
-	}
-
-	// Generate new token
-	newToken := uuid.New().String()
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	err = s.users.UpdateVerificationToken(user.ID, newToken, expiresAt)
-	if err != nil {
-		return err
+		slog.Info("resend verification: account already verified (silently ignored)", "user_id", user.ID)
+		return nil
 	}
 
 	if s.emailService == nil {
-		return errors.New("email service not configured")
+		slog.Warn("resend verification: email service not configured; cannot send", "user_id", user.ID)
+		return nil
 	}
 
-	return s.emailService.SendVerificationEmail(user.Email, newToken)
+	newToken := uuid.New().String()
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	if err := s.users.UpdateVerificationToken(ctx, user.ID, newToken, expiresAt); err != nil {
+		slog.Error("resend verification: failed to update token", "user_id", user.ID, "err", err)
+		return nil
+	}
+
+	if err := s.emailService.SendVerificationEmail(user.Email, newToken); err != nil {
+		slog.Error("resend verification: send failed", "user_id", user.ID, "err", err)
+	}
+	return nil
 }
 
-// LoginWithGoogle handles Google OAuth login
-func (s *AuthService) LoginWithGoogle(idToken string) (*data.User, string, error) {
-	ctx := context.Background()
-
-	// Verify the Google ID token
+// LoginWithGoogle handles Google OAuth login.
+//
+// The supplied idToken is validated end-to-end (signature, issuer, expiry,
+// audience) by GoogleOAuthService.VerifyIDToken. If a local account already
+// exists for the Google email, it is auto-linked only when both Google AND the
+// existing local account have verified emails — this prevents pre-verification
+// account squatting where an attacker registers an unverified account with
+// someone else's email and then takes it over when the real owner clicks
+// "Sign in with Google".
+func (s *AuthService) LoginWithGoogle(ctx context.Context, idToken string) (*data.User, string, error) {
 	googleUser, err := s.googleOAuth.VerifyIDToken(ctx, idToken)
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid Google token: %w", err)
 	}
 
-	// Check if user exists by Google ID
-	user, err := s.users.GetUserByGoogleID(googleUser.ID)
-	if err == nil {
-		// User exists, generate JWT
+	// Google should always set email_verified=true for accounts that completed
+	// signup, but enforce it explicitly so a malformed or unusual token can't
+	// slip through.
+	if !googleUser.EmailVerified {
+		return nil, "", errors.New("google account email is not verified")
+	}
+
+	// Existing user, matched by Google sub claim — fast path.
+	if user, err := s.users.GetUserByGoogleID(ctx, googleUser.ID); err == nil {
 		jwtToken, err := s.jwtService.GenerateToken(user.ID, user.Email)
 		if err != nil {
 			return nil, "", &TokenGenerationError{}
@@ -124,12 +142,13 @@ func (s *AuthService) LoginWithGoogle(idToken string) (*data.User, string, error
 		return user, jwtToken, nil
 	}
 
-	// Check if email exists (link accounts)
-	existingUser, err := s.users.GetUserByEmail(googleUser.Email)
-	if err == nil {
-		// Link Google account to existing user
-		err = s.users.LinkGoogleAccount(existingUser.ID, googleUser.ID)
-		if err != nil {
+	// Existing user matched by email — only safe to auto-link if the local
+	// account already proved control of that mailbox.
+	if existingUser, err := s.users.GetUserByEmail(ctx, googleUser.Email); err == nil {
+		if !existingUser.EmailVerified {
+			return nil, "", errors.New("an account exists for this email but is not verified; verify via the verification email or sign in with password to link Google")
+		}
+		if err := s.users.LinkGoogleAccount(ctx, existingUser.ID, googleUser.ID); err != nil {
 			return nil, "", err
 		}
 		existingUser.GoogleID = &googleUser.ID
@@ -142,8 +161,7 @@ func (s *AuthService) LoginWithGoogle(idToken string) (*data.User, string, error
 		return existingUser, jwtToken, nil
 	}
 
-	// Create new user
-	user, err = s.users.CreateGoogleUser(googleUser.Email, googleUser.ID)
+	user, err := s.users.CreateGoogleUser(ctx, googleUser.Email, googleUser.ID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -156,9 +174,9 @@ func (s *AuthService) LoginWithGoogle(idToken string) (*data.User, string, error
 	return user, jwtToken, nil
 }
 
-func (s *AuthService) Login(email, password string) (*data.User, string, error) {
+func (s *AuthService) Login(ctx context.Context, email, password string) (*data.User, string, error) {
 	// Get user
-	user, err := s.users.GetUserByEmail(email)
+	user, err := s.users.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, "", &InvalidCredentialsError{}
 	}
@@ -177,13 +195,13 @@ func (s *AuthService) Login(email, password string) (*data.User, string, error) 
 	return user, token, nil
 }
 
-func (s *AuthService) GetUserFromToken(tokenString string) (*data.User, error) {
+func (s *AuthService) GetUserFromToken(ctx context.Context, tokenString string) (*data.User, error) {
 	claims, err := s.jwtService.ValidateToken(tokenString)
 	if err != nil {
 		return nil, &InvalidCredentialsError{}
 	}
 
-	user, err := s.users.GetUserByID(claims.UserID)
+	user, err := s.users.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		return nil, &UserNotFoundError{}
 	}
@@ -191,20 +209,8 @@ func (s *AuthService) GetUserFromToken(tokenString string) (*data.User, error) {
 	return user, nil
 }
 
-func (s *AuthService) GetUserByID(userID string) (*data.User, error) {
-	return s.users.GetUserByID(userID)
-}
-
-func (s *AuthService) UpdateBalance(userID string, balance float64) error {
-	// Validate balance range
-	if err := util.ValidateBalance(balance); err != nil {
-		return err
-	}
-	return s.users.UpdateBalance(userID, balance)
-}
-
-func (s *AuthService) GetAllUsers() ([]data.User, error) {
-	return s.users.GetAllUsers()
+func (s *AuthService) GetUserByID(ctx context.Context, userID string) (*data.User, error) {
+	return s.users.GetUserByID(ctx, userID)
 }
 
 // validatePasswordStrength enforces password complexity requirements
@@ -212,12 +218,12 @@ func validatePasswordStrength(password string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters long")
 	}
-	
+
 	hasUpper := false
 	hasLower := false
 	hasNumber := false
 	hasSpecial := false
-	
+
 	for _, char := range password {
 		switch {
 		case 'A' <= char && char <= 'Z':
@@ -227,16 +233,16 @@ func validatePasswordStrength(password string) error {
 		case '0' <= char && char <= '9':
 			hasNumber = true
 		case char == '!' || char == '@' || char == '#' || char == '$' || char == '%' ||
-			 char == '^' || char == '&' || char == '*' || char == '(' || char == ')' ||
-			 char == '-' || char == '_' || char == '+' || char == '=' || char == '[' ||
-			 char == ']' || char == '{' || char == '}' || char == '|' || char == '\\' ||
-			 char == ':' || char == ';' || char == '"' || char == '\'' || char == '<' ||
-			 char == '>' || char == ',' || char == '.' || char == '?' || char == '/' ||
-			 char == '~' || char == '`':
+			char == '^' || char == '&' || char == '*' || char == '(' || char == ')' ||
+			char == '-' || char == '_' || char == '+' || char == '=' || char == '[' ||
+			char == ']' || char == '{' || char == '}' || char == '|' || char == '\\' ||
+			char == ':' || char == ';' || char == '"' || char == '\'' || char == '<' ||
+			char == '>' || char == ',' || char == '.' || char == '?' || char == '/' ||
+			char == '~' || char == '`':
 			hasSpecial = true
 		}
 	}
-	
+
 	if !hasUpper {
 		return errors.New("password must contain at least one uppercase letter")
 	}
@@ -249,7 +255,6 @@ func validatePasswordStrength(password string) error {
 	if !hasSpecial {
 		return errors.New("password must contain at least one special character")
 	}
-	
+
 	return nil
 }
-

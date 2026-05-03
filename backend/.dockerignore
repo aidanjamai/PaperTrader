@@ -20,3 +20,8 @@ main
 Dockerfile
 .dockerignore
 
+# Node artifacts (no Node code in this Go service)
+node_modules
+package.json
+package-lock.json
+

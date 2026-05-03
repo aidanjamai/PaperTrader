@@ -10,8 +10,6 @@ import (
 const (
 	MinQuantity = 1
 	MaxQuantity = 1000000 // 1 million shares - reasonable upper limit
-	MinBalance  = 0.0
-	MaxBalance  = 1000000000.0 // 1 billion dollars - reasonable upper limit
 )
 
 // Stock symbol validation regex: 1-10 uppercase letters, optionally followed by . and 1-2 uppercase letters (for class shares)
@@ -47,29 +45,12 @@ func ValidateQuantity(quantity int) error {
 	return nil
 }
 
-// ValidateBalance validates that a balance is within acceptable bounds
-func ValidateBalance(balance float64) error {
-	if balance < MinBalance {
-		return &ValidationError{
-			Field:   "balance",
-			Message: fmt.Sprintf("balance cannot be negative (minimum: %.2f)", MinBalance),
-		}
-	}
-	if balance > MaxBalance {
-		return &ValidationError{
-			Field:   "balance",
-			Message: fmt.Sprintf("balance cannot exceed %.2f", MaxBalance),
-		}
-	}
-	return nil
-}
-
 // SanitizeString removes dangerous characters and trims whitespace
 // Removes null bytes, control characters, and excessive whitespace
 func SanitizeString(input string) string {
 	// Remove null bytes
 	input = strings.ReplaceAll(input, "\x00", "")
-	
+
 	// Remove other control characters (except newline, tab, carriage return)
 	var result strings.Builder
 	for _, char := range input {
@@ -78,7 +59,7 @@ func SanitizeString(input string) string {
 			result.WriteRune(char)
 		}
 	}
-	
+
 	// Trim whitespace
 	return strings.TrimSpace(result.String())
 }
@@ -88,10 +69,10 @@ func SanitizeString(input string) string {
 func ValidateSymbol(symbol string) (string, error) {
 	// Sanitize first
 	symbol = SanitizeString(symbol)
-	
+
 	// Convert to uppercase
 	symbol = strings.ToUpper(symbol)
-	
+
 	// Validate format: 1-10 uppercase letters, optionally followed by . and 1-2 uppercase letters
 	if !symbolRegex.MatchString(symbol) {
 		return "", &ValidationError{
@@ -99,15 +80,6 @@ func ValidateSymbol(symbol string) (string, error) {
 			Message: "invalid stock symbol format. Must be 1-10 uppercase letters, optionally followed by . and 1-2 letters (e.g., AAPL, BRK.B)",
 		}
 	}
-	
-	// Additional length check (defense in depth)
-	if len(symbol) > 12 { // Max: 10 chars + dot + 2 chars = 13, but we'll use 12 as safety margin
-		return "", &ValidationError{
-			Field:   "symbol",
-			Message: "stock symbol is too long",
-		}
-	}
-	
+
 	return symbol, nil
 }
-

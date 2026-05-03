@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,20 +9,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	ID                        string     `json:"id"`
-	Email                     string     `json:"email"`
-	Password                  string     `json:"-"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	Balance                   float64    `json:"balance"`
-	EmailVerified             bool       `json:"email_verified"`
-	VerificationToken         *string    `json:"-"`
-	VerificationTokenExpires  *time.Time `json:"-"`
-	GoogleID                  *string    `json:"-"`
-	CreatedVia                string     `json:"created_via"`
+	ID                       string          `json:"id"`
+	Email                    string          `json:"email"`
+	Password                 string          `json:"-"`
+	CreatedAt                time.Time       `json:"created_at"`
+	Balance                  decimal.Decimal `json:"balance"`
+	EmailVerified            bool            `json:"email_verified"`
+	VerificationToken        *string         `json:"-"`
+	VerificationTokenExpires *time.Time      `json:"-"`
+	GoogleID                 *string         `json:"-"`
+	CreatedVia               string          `json:"created_via"`
 }
 
 type UserStore struct {
@@ -32,45 +34,24 @@ func NewUserStore(db DBTX) *UserStore {
 	return &UserStore{db: db}
 }
 
-func (us *UserStore) Init() error {
-	query := `
-	CREATE TABLE IF NOT EXISTS users (
-		id VARCHAR(255) PRIMARY KEY,
-		email VARCHAR(255) UNIQUE NOT NULL,
-		password TEXT,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		balance NUMERIC(15,2) DEFAULT 10000.00,
-		email_verified BOOLEAN DEFAULT FALSE,
-		verification_token VARCHAR(255),
-		verification_token_expires TIMESTAMP,
-		google_id VARCHAR(255) UNIQUE,
-		created_via VARCHAR(50) DEFAULT 'email'
-	);`
-
-	_, err := us.db.Exec(query)
+// GetBalanceForUpdate returns the user's balance and locks the row until the
+// surrounding transaction commits. Use this inside a tx that will subsequently
+// UPDATE the balance — without the lock, two concurrent buys can both pass a
+// "balance >= cost" check and silently double-spend.
+func (us *UserStore) GetBalanceForUpdate(ctx context.Context, userID string) (decimal.Decimal, error) {
+	query := `SELECT balance FROM users WHERE id = $1 FOR UPDATE`
+	var balance decimal.Decimal
+	err := us.db.QueryRowContext(ctx, query, userID).Scan(&balance)
 	if err != nil {
-		return err
+		if err == sql.ErrNoRows {
+			return decimal.Zero, errors.New("user not found")
+		}
+		return decimal.Zero, err
 	}
-
-	// Migration: Add new columns if they don't exist (for existing databases)
-	migrationQueries := []string{
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR(255)`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_expires TIMESTAMP`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_via VARCHAR(50) DEFAULT 'email'`,
-		// Make password nullable for Google OAuth users
-		`ALTER TABLE users ALTER COLUMN password DROP NOT NULL`,
-	}
-
-	for _, migrationQuery := range migrationQueries {
-		us.db.Exec(migrationQuery) // Ignore errors for existing columns
-	}
-
-	return nil
+	return balance, nil
 }
 
-func (us *UserStore) CreateUser(email, password string) (*User, error) {
+func (us *UserStore) CreateUser(ctx context.Context, email, password string) (*User, error) {
 	userID := uuid.New().String()
 
 	// Hash password with higher cost
@@ -84,15 +65,15 @@ func (us *UserStore) CreateUser(email, password string) (*User, error) {
 	INSERT INTO users (id, email, password, created_at, balance, email_verified, created_via)
 	VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 10000.00, FALSE, 'email')`
 
-	_, err = us.db.Exec(query, userID, email, string(hashedPassword))
+	_, err = us.db.ExecContext(ctx, query, userID, email, string(hashedPassword))
 	if err != nil {
 		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	return us.GetUserByID(userID)
+	return us.GetUserByID(ctx, userID)
 }
 
-func (us *UserStore) CreateUserWithVerification(email, password string) (*User, string, error) {
+func (us *UserStore) CreateUserWithVerification(ctx context.Context, email, password string) (*User, string, error) {
 	userID := uuid.New().String()
 	verificationToken := uuid.New().String()
 	expiresAt := time.Now().Add(24 * time.Hour)
@@ -108,12 +89,12 @@ func (us *UserStore) CreateUserWithVerification(email, password string) (*User, 
 	INSERT INTO users (id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, created_via)
 	VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 10000.00, FALSE, $4, $5, 'email')`
 
-	_, err = us.db.Exec(query, userID, email, string(hashedPassword), verificationToken, expiresAt)
+	_, err = us.db.ExecContext(ctx, query, userID, email, string(hashedPassword), verificationToken, expiresAt)
 	if err != nil {
 		return nil, "", fmt.Errorf("error creating user: %w", err)
 	}
 
-	user, err := us.GetUserByID(userID)
+	user, err := us.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -121,7 +102,7 @@ func (us *UserStore) CreateUserWithVerification(email, password string) (*User, 
 	return user, verificationToken, nil
 }
 
-func (us *UserStore) CreateGoogleUser(email, googleID string) (*User, error) {
+func (us *UserStore) CreateGoogleUser(ctx context.Context, email, googleID string) (*User, error) {
 	userID := uuid.New().String()
 	email = normalizeEmail(email)
 
@@ -129,23 +110,23 @@ func (us *UserStore) CreateGoogleUser(email, googleID string) (*User, error) {
 	INSERT INTO users (id, email, password, created_at, balance, email_verified, google_id, created_via)
 	VALUES ($1, $2, NULL, CURRENT_TIMESTAMP, 10000.00, TRUE, $3, 'google')`
 
-	_, err := us.db.Exec(query, userID, email, googleID)
+	_, err := us.db.ExecContext(ctx, query, userID, email, googleID)
 	if err != nil {
 		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	return us.GetUserByID(userID)
+	return us.GetUserByID(ctx, userID)
 }
 
-func (us *UserStore) VerifyEmail(token string) error {
+func (us *UserStore) VerifyEmail(ctx context.Context, token string) error {
 	query := `
-	UPDATE users 
+	UPDATE users
 	SET email_verified = TRUE, verification_token = NULL, verification_token_expires = NULL
-	WHERE verification_token = $1 
+	WHERE verification_token = $1
 	AND verification_token_expires > CURRENT_TIMESTAMP
 	AND email_verified = FALSE`
 
-	result, err := us.db.Exec(query, token)
+	result, err := us.db.ExecContext(ctx, query, token)
 	if err != nil {
 		return err
 	}
@@ -162,15 +143,15 @@ func (us *UserStore) VerifyEmail(token string) error {
 	return nil
 }
 
-func (us *UserStore) GetUserByGoogleID(googleID string) (*User, error) {
-	query := `SELECT id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, google_id, created_via 
+func (us *UserStore) GetUserByGoogleID(ctx context.Context, googleID string) (*User, error) {
+	query := `SELECT id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, google_id, created_via
 	FROM users WHERE google_id = $1`
 
 	var user User
 	var password, verificationToken, googleIDVal sql.NullString
 	var verificationTokenExpires sql.NullTime
 
-	err := us.db.QueryRow(query, googleID).Scan(
+	err := us.db.QueryRowContext(ctx, query, googleID).Scan(
 		&user.ID, &user.Email, &password,
 		&user.CreatedAt, &user.Balance, &user.EmailVerified,
 		&verificationToken, &verificationTokenExpires, &googleIDVal, &user.CreatedVia,
@@ -199,19 +180,19 @@ func (us *UserStore) GetUserByGoogleID(googleID string) (*User, error) {
 	return &user, nil
 }
 
-func (us *UserStore) UpdateVerificationToken(userID string, token string, expiresAt time.Time) error {
+func (us *UserStore) UpdateVerificationToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
 	query := `UPDATE users SET verification_token = $1, verification_token_expires = $2 WHERE id = $3`
-	_, err := us.db.Exec(query, token, expiresAt, userID)
+	_, err := us.db.ExecContext(ctx, query, token, expiresAt, userID)
 	return err
 }
 
-func (us *UserStore) LinkGoogleAccount(userID string, googleID string) error {
+func (us *UserStore) LinkGoogleAccount(ctx context.Context, userID string, googleID string) error {
 	query := `UPDATE users SET google_id = $1, email_verified = TRUE WHERE id = $2`
-	_, err := us.db.Exec(query, googleID, userID)
+	_, err := us.db.ExecContext(ctx, query, googleID, userID)
 	return err
 }
 
-func (us *UserStore) GetUserByEmail(email string) (*User, error) {
+func (us *UserStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	query := `SELECT id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, google_id, created_via FROM users WHERE email = $1`
 
 	var user User
@@ -219,7 +200,7 @@ func (us *UserStore) GetUserByEmail(email string) (*User, error) {
 	var verificationTokenExpires sql.NullTime
 
 	email = normalizeEmail(email)
-	err := us.db.QueryRow(query, email).Scan(
+	err := us.db.QueryRowContext(ctx, query, email).Scan(
 		&user.ID, &user.Email, &password,
 		&user.CreatedAt, &user.Balance, &user.EmailVerified,
 		&verificationToken, &verificationTokenExpires, &googleID, &user.CreatedVia,
@@ -248,14 +229,14 @@ func (us *UserStore) GetUserByEmail(email string) (*User, error) {
 	return &user, nil
 }
 
-func (us *UserStore) GetUserByID(id string) (*User, error) {
+func (us *UserStore) GetUserByID(ctx context.Context, id string) (*User, error) {
 	query := `SELECT id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, google_id, created_via FROM users WHERE id = $1`
 
 	var user User
 	var password, verificationToken, googleID sql.NullString
 	var verificationTokenExpires sql.NullTime
 
-	err := us.db.QueryRow(query, id).Scan(
+	err := us.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID, &user.Email, &password,
 		&user.CreatedAt, &user.Balance, &user.EmailVerified,
 		&verificationToken, &verificationTokenExpires, &googleID, &user.CreatedVia,
@@ -282,52 +263,6 @@ func (us *UserStore) GetUserByID(id string) (*User, error) {
 	}
 
 	return &user, nil
-}
-
-func (us *UserStore) GetAllUsers() ([]User, error) {
-	query := `SELECT id, email, password, created_at, balance, email_verified, verification_token, verification_token_expires, google_id, created_via FROM users`
-	var users []User
-
-	rows, err := us.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var user User
-		var password, verificationToken, googleID sql.NullString
-		var verificationTokenExpires sql.NullTime
-
-		err = rows.Scan(
-			&user.ID, &user.Email, &password,
-			&user.CreatedAt, &user.Balance, &user.EmailVerified,
-			&verificationToken, &verificationTokenExpires, &googleID, &user.CreatedVia)
-		if err != nil {
-			return nil, err
-		}
-
-		if password.Valid {
-			user.Password = password.String
-		}
-		if verificationToken.Valid {
-			user.VerificationToken = &verificationToken.String
-		}
-		if verificationTokenExpires.Valid {
-			user.VerificationTokenExpires = &verificationTokenExpires.Time
-		}
-		if googleID.Valid {
-			user.GoogleID = &googleID.String
-		}
-
-		users = append(users, user)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
 }
 
 func (us *UserStore) ValidatePassword(user *User, password string) bool {
@@ -338,16 +273,16 @@ func (us *UserStore) ValidatePassword(user *User, password string) bool {
 	return err == nil
 }
 
-func (us *UserStore) UpdateBalance(userID string, newBalance float64) error {
+func (us *UserStore) UpdateBalance(ctx context.Context, userID string, newBalance decimal.Decimal) error {
 	query := `UPDATE users SET balance = $1 WHERE id = $2`
-	_, err := us.db.Exec(query, newBalance, userID)
+	_, err := us.db.ExecContext(ctx, query, newBalance, userID)
 	return err
 }
 
-func (us *UserStore) GetBalance(userID string) (float64, error) {
+func (us *UserStore) GetBalance(ctx context.Context, userID string) (decimal.Decimal, error) {
 	query := `SELECT balance FROM users WHERE id = $1`
-	var balance float64
-	err := us.db.QueryRow(query, userID).Scan(&balance)
+	var balance decimal.Decimal
+	err := us.db.QueryRowContext(ctx, query, userID).Scan(&balance)
 	return balance, err
 }
 

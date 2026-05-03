@@ -1,9 +1,10 @@
 package market
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,11 +12,21 @@ import (
 	"papertrader/internal/util"
 )
 
-type StockHandler struct {
-	service *service.MarketService
+// MarketServicer is the subset of service.MarketService used by StockHandler.
+// Defining it here mirrors the InvestmentServicer / WatchlistServicer pattern
+// in sibling packages and lets the handler be tested without a live MarketStack
+// client.
+type MarketServicer interface {
+	GetStock(ctx context.Context, symbol string) (*service.StockData, error)
+	GetHistoricalData(ctx context.Context, symbol string) (*service.HistoricalData, error)
+	GetBatchHistoricalData(ctx context.Context, symbols []string) (map[string]*service.HistoricalData, error)
 }
 
-func NewStockHandler(s *service.MarketService) *StockHandler {
+type StockHandler struct {
+	service MarketServicer
+}
+
+func NewStockHandler(s MarketServicer) *StockHandler {
 	return &StockHandler{service: s}
 }
 
@@ -48,7 +59,7 @@ func (h *StockHandler) writeErrorResponse(w http.ResponseWriter, statusCode int,
 func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 	symbol := r.URL.Query().Get("symbol")
 
-	data, err := h.service.GetStock(symbol)
+	data, err := h.service.GetStock(r.Context(), symbol)
 	if err != nil {
 		userMessage, statusCode, _ := util.MapServiceError(err)
 		h.writeErrorResponse(w, statusCode, userMessage)
@@ -58,45 +69,12 @@ func (h *StockHandler) GetStock(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, http.StatusOK, "Stock data retrieved successfully", data)
 }
 
-func (h *StockHandler) PostStock(w http.ResponseWriter, r *http.Request) {
-	var req PostStockRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
-		return
-	}
-
-	if err := h.service.SaveStock(req.Symbol, req.Price); err != nil {
-		userMessage, statusCode, _ := util.MapServiceError(err)
-		h.writeErrorResponse(w, statusCode, userMessage)
-		return
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, "Stock data saved successfully", req)
-}
-
-func (h *StockHandler) DeleteStockBySymbol(w http.ResponseWriter, r *http.Request) {
-	var req StockSymbolRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON format")
-		return
-	}
-
-	err := h.service.DeleteStockBySymbol(req.Symbol)
-	if err != nil {
-		userMessage, statusCode, _ := util.MapServiceError(err)
-		h.writeErrorResponse(w, statusCode, userMessage)
-		return
-	}
-
-	h.writeSuccessResponse(w, http.StatusOK, "Stock cache invalidated successfully", nil)
-}
-
 func (h *StockHandler) GetStockHistoricalDataDaily(w http.ResponseWriter, r *http.Request) {
 	symbol := r.URL.Query().Get("symbol")
 
-	data, err := h.service.GetHistoricalData(symbol)
+	data, err := h.service.GetHistoricalData(r.Context(), symbol)
 	if err != nil {
-		log.Printf("GetStockHistoricalDataDaily error: %v", err)
+		slog.Warn("GetStockHistoricalDataDaily failed", "symbol", symbol, "err", err)
 		userMessage, statusCode, _ := util.MapServiceError(err)
 		h.writeErrorResponse(w, statusCode, userMessage)
 		return
@@ -131,9 +109,9 @@ func (h *StockHandler) GetBatchHistoricalDataDaily(w http.ResponseWriter, r *htt
 		return
 	}
 
-	data, err := h.service.GetBatchHistoricalData(symbols)
+	data, err := h.service.GetBatchHistoricalData(r.Context(), symbols)
 	if err != nil {
-		log.Printf("GetBatchHistoricalDataDaily error: %v", err)
+		slog.Warn("GetBatchHistoricalDataDaily failed", "symbols", symbols, "err", err)
 		userMessage, statusCode, _ := util.MapServiceError(err)
 		h.writeErrorResponse(w, statusCode, userMessage)
 		return

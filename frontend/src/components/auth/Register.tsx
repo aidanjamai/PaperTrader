@@ -1,6 +1,6 @@
 import React, { useState, FormEvent, ChangeEvent, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useGoogleLogin } from '@react-oauth/google';
+import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
 import { apiRequest } from '../../services/api';
 import { User, RegisterRequest, AuthResponse } from '../../types';
 import { validatePassword, validateEmail } from '../../utils/validation';
@@ -20,36 +20,35 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
   const [googleLoading, setGoogleLoading] = useState<boolean>(false);
   const navigate = useNavigate();
 
-  const handleGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse: { access_token: string }) => {
-      setGoogleLoading(true);
-      setError('');
-      try {
-        const response = await apiRequest<AuthResponse>('/account/auth/google', {
-          method: 'POST',
-          body: JSON.stringify({ token: tokenResponse.access_token })
-        });
+  const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
+    const credential = credentialResponse.credential;
+    if (!credential) {
+      setError('Google login failed: no credential returned');
+      return;
+    }
+    setGoogleLoading(true);
+    setError('');
+    try {
+      const response = await apiRequest<AuthResponse>('/account/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ token: credential })
+      });
 
-        const data = await response.json() as AuthResponse;
-        if (response.ok && data.success && data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          onLogin(data.user);
-          navigate('/dashboard');
-        } else {
-          setError(data.message || 'Google login failed');
-        }
-      } catch (error) {
-        console.error('Google login error:', error);
-        setError('Failed to login with Google');
-      } finally {
-        setGoogleLoading(false);
+      const data = await response.json() as AuthResponse;
+      if (response.ok && data.success && data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        onLogin(data.user);
+        navigate('/dashboard');
+      } else {
+        setError(data.message || 'Google login failed');
       }
-    },
-    onError: () => {
-      setError('Google login failed');
+    } catch (error) {
+      console.error('Google login error:', error);
+      setError('Failed to login with Google');
+    } finally {
       setGoogleLoading(false);
     }
-  });
+  };
 
   // Real-time password validation
   const passwordValidation = useMemo(() => {
@@ -136,9 +135,9 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
   };
 
   return (
-    <div style={{ marginTop: '60px' }}>
+    <div className="container-narrow" style={{ paddingTop: 40 }}>
       <div className="card">
-        <h2>Create Account</h2>
+        <h2>Create account</h2>
         
         {error && (
           <div className="alert alert-error">
@@ -146,38 +145,32 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => handleGoogleLogin()}
-          className="btn btn-secondary"
-          style={{ 
-            width: '100%', 
-            marginBottom: '16px',
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={() => setError('Google login failed')}
+            useOneTap={false}
+            text="signup_with"
+          />
+        </div>
+        {googleLoading && (
+          <div className="muted" style={{ textAlign: 'center', marginBottom: 16, fontSize: 13 }}>
+            Signing in…
+          </div>
+        )}
+
+        <div
+          style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
+            marginBottom: 16,
           }}
-          disabled={loading || googleLoading}
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" style={{ flexShrink: 0 }}>
-            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
-            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-            <path fill="#FBBC05" d="M3.964 10.712c-.18-.54-.282-1.117-.282-1.712 0-.595.102-1.172.282-1.712V4.956H.957C.348 6.174 0 7.55 0 9c0 1.45.348 2.826.957 4.044l3.007-2.332z"/>
-            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.956L3.964 7.288C4.672 5.163 6.656 3.58 9 3.58z"/>
-          </svg>
-          {googleLoading ? 'Signing in...' : 'Register with Google'}
-        </button>
-
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          marginBottom: '16px',
-          textAlign: 'center'
-        }}>
-          <div style={{ flex: 1, height: '1px', backgroundColor: '#ddd' }}></div>
-          <span style={{ padding: '0 16px', color: '#666' }}>or</span>
-          <div style={{ flex: 1, height: '1px', backgroundColor: '#ddd' }}></div>
+          <div style={{ flex: 1, height: 1, background: 'var(--hairline)' }} />
+          <span className="eyebrow" style={{ padding: '0 12px' }}>
+            or
+          </span>
+          <div style={{ flex: 1, height: 1, background: 'var(--hairline)' }} />
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -208,24 +201,33 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
               disabled={loading || googleLoading}
             />
             {formData.password && (
-              <div className="mt-2" style={{ fontSize: '0.875rem' }}>
-                <div style={{ marginBottom: '8px', fontWeight: '500' }}>Password requirements:</div>
-                <ul style={{ margin: 0, paddingLeft: '20px', listStyle: 'none' }}>
-                  <li style={{ color: formData.password.length >= 8 ? '#28a745' : '#dc3545' }}>
-                    {formData.password.length >= 8 ? '✓' : '✗'} At least 8 characters
-                  </li>
-                  <li style={{ color: /[A-Z]/.test(formData.password) ? '#28a745' : '#dc3545' }}>
-                    {/[A-Z]/.test(formData.password) ? '✓' : '✗'} One uppercase letter
-                  </li>
-                  <li style={{ color: /[a-z]/.test(formData.password) ? '#28a745' : '#dc3545' }}>
-                    {/[a-z]/.test(formData.password) ? '✓' : '✗'} One lowercase letter
-                  </li>
-                  <li style={{ color: /[0-9]/.test(formData.password) ? '#28a745' : '#dc3545' }}>
-                    {/[0-9]/.test(formData.password) ? '✓' : '✗'} One number
-                  </li>
-                  <li style={{ color: /[!@#$%^&*()\-_+=[\]{}|\\:;"'<>,.?/~`]/.test(formData.password) ? '#28a745' : '#dc3545' }}>
-                    {/[!@#$%^&*()\-_+=[\]{}|\\:;"'<>,.?/~`]/.test(formData.password) ? '✓' : '✗'} One special character
-                  </li>
+              <div style={{ fontSize: 13, marginTop: 10 }}>
+                <div className="eyebrow" style={{ marginBottom: 6 }}>
+                  Password requirements
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+                  {[
+                    { ok: formData.password.length >= 8, label: 'At least 8 characters' },
+                    { ok: /[A-Z]/.test(formData.password), label: 'One uppercase letter' },
+                    { ok: /[a-z]/.test(formData.password), label: 'One lowercase letter' },
+                    { ok: /[0-9]/.test(formData.password), label: 'One number' },
+                    {
+                      ok: /[!@#$%^&*()\-_+=[\]{}|\\:;"'<>,.?/~`]/.test(formData.password),
+                      label: 'One special character',
+                    },
+                  ].map((req, i) => (
+                    <li
+                      key={i}
+                      className="mono"
+                      style={{
+                        color: req.ok ? 'var(--gain)' : 'var(--ink-muted)',
+                        fontSize: 12,
+                        lineHeight: 1.7,
+                      }}
+                    >
+                      {req.ok ? '✓' : '·'} {req.label}
+                    </li>
+                  ))}
                 </ul>
               </div>
             )}
@@ -244,49 +246,27 @@ const Register: React.FC<RegisterProps> = ({ onLogin }) => {
               disabled={loading || googleLoading}
             />
             {confirmPassword && !passwordsMatch && (
-              <div style={{ display: 'block', color: '#dc3545', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                Passwords do not match
+              <div className="loss-text" style={{ fontSize: 12, marginTop: 6 }}>
+                Passwords do not match.
               </div>
             )}
           </div>
 
           <button
             type="submit"
-            className={isFormValid ? 'btn btn-primary' : 'btn btn-secondary'}
-            style={{ 
-              width: '100%',
-              ...(isFormValid ? {} : { 
-                backgroundColor: '#6c757d',
-                borderColor: '#6c757d',
-                color: '#fff',
-                cursor: 'not-allowed',
-                opacity: 0.65
-              })
-            }}
+            className="btn btn-primary btn-block"
             disabled={loading || !isFormValid}
-            onMouseEnter={(e) => {
-              if (!isFormValid) {
-                e.currentTarget.style.backgroundColor = '#6c757d';
-                e.currentTarget.style.borderColor = '#6c757d';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isFormValid) {
-                e.currentTarget.style.backgroundColor = '#6c757d';
-                e.currentTarget.style.borderColor = '#6c757d';
-              }
-            }}
           >
-            {loading ? 'Creating Account...' : 'Create Account'}
+            {loading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', marginTop: '24px' }}>
-          <p style={{ color: '#666', marginBottom: '16px' }}>
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
             Already have an account?
           </p>
           <Link to="/login" className="btn btn-secondary">
-            Sign In
+            Sign in
           </Link>
         </div>
       </div>

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/resend/resend-go/v2"
 )
@@ -22,7 +23,11 @@ func NewEmailService(apiKey, fromEmail, frontendURL string) *EmailService {
 }
 
 func (es *EmailService) SendVerificationEmail(to, token string) error {
-	verificationURL := fmt.Sprintf("%s/verify-email?token=%s", es.frontendURL, token)
+	// URL-encode the token defensively. Today the token is a UUID v4 (hex
+	// digits and hyphens only), but if the token format ever changes to
+	// include reserved characters (`+`, `=`, `/`) the link would silently
+	// break without this.
+	verificationURL := fmt.Sprintf("%s/verify-email?token=%s", es.frontendURL, url.QueryEscape(token))
 
 	htmlContent := fmt.Sprintf(`
 	<!DOCTYPE html>
@@ -55,4 +60,3 @@ func (es *EmailService) SendVerificationEmail(to, token string) error {
 	_, err := es.client.Emails.Send(params)
 	return err
 }
-

@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -24,12 +24,17 @@ func RateLimitMiddleware(limiter service.RateLimiter, cfg *config.Config) func(h
 			ipAddress := getIPAddress(r)
 
 			// Check rate limits
-			result, err := limiter.CheckLimit(userID, ipAddress)
+			result, err := limiter.CheckLimit(r.Context(), userID, ipAddress)
 			if err != nil {
 				// In production: fail-closed (deny request if rate limiter unavailable)
 				// In development: fail-open (allow request for easier debugging)
 				if cfg != nil && cfg.IsProduction() {
-					log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v", userID, ipAddress, err)
+					slog.Warn("rate limiter error in production; denying request",
+						"user_id", userID,
+						"remote_addr", ipAddress,
+						"err", err,
+						"component", "rate_limit",
+					)
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusServiceUnavailable)
 					json.NewEncoder(w).Encode(map[string]interface{}{
@@ -40,7 +45,12 @@ func RateLimitMiddleware(limiter service.RateLimiter, cfg *config.Config) func(h
 					return
 				}
 				// Development: fail-open
-				log.Printf("[RateLimitMiddleware] Error checking rate limit for userID=%s, ip=%s: %v (allowing request in development)", userID, ipAddress, err)
+				slog.Warn("rate limiter error in development; allowing request",
+					"user_id", userID,
+					"remote_addr", ipAddress,
+					"err", err,
+					"component", "rate_limit",
+				)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -60,36 +70,33 @@ func RateLimitMiddleware(limiter service.RateLimiter, cfg *config.Config) func(h
 	}
 }
 
-// getIPAddress extracts the client IP address from the request
-// It checks X-Forwarded-For header first (for proxy/load balancer scenarios),
-// then X-Real-IP, and finally falls back to RemoteAddr
+// getIPAddress extracts the client IP for rate-limit keying.
+//
+// We deploy behind exactly one trusted reverse proxy (Caddy), which appends
+// the real client IP as the *rightmost* entry in X-Forwarded-For. Any IPs to
+// the left were either added by the client itself or by upstream proxies we
+// don't trust — taking the leftmost would let an attacker spoof their bucket
+// by sending `X-Forwarded-For: 1.2.3.4`. So: take the rightmost entry.
+//
+// X-Real-IP and RemoteAddr are fallbacks for direct (non-proxied) traffic.
 func getIPAddress(r *http.Request) string {
-	// Check X-Forwarded-For header (may contain multiple IPs)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// X-Forwarded-For can contain multiple IPs separated by commas
-		// The first one is usually the original client IP
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		ips := strings.Split(forwarded, ",")
-		if len(ips) > 0 {
-			ip := strings.TrimSpace(ips[0])
-			if ip != "" {
+		// Walk from the right; skip empty segments.
+		for i := len(ips) - 1; i >= 0; i-- {
+			if ip := strings.TrimSpace(ips[i]); ip != "" {
 				return ip
 			}
 		}
 	}
 
-	// Check X-Real-IP header
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
 		return realIP
 	}
 
-	// Fall back to RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		// If SplitHostPort fails, RemoteAddr might not have a port
 		return r.RemoteAddr
 	}
-
 	return ip
 }

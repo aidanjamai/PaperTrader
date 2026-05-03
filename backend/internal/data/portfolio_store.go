@@ -1,24 +1,26 @@
 package data
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // UserStock represents a user's stock holding (moved from collections package)
 type UserStock struct {
-	ID                string    `json:"id"`
-	UserID            string    `json:"user_id"`
-	Symbol            string    `json:"symbol"`
-	Quantity          int       `json:"quantity"`
-	AvgPrice          float64   `json:"avg_price"`
-	Total             float64   `json:"total"`
-	CurrentStockPrice float64   `json:"current_stock_price"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                string          `json:"id"`
+	UserID            string          `json:"user_id"`
+	Symbol            string          `json:"symbol"`
+	Quantity          int             `json:"quantity"`
+	AvgPrice          decimal.Decimal `json:"avg_price"`
+	Total             decimal.Decimal `json:"total"`
+	CurrentStockPrice decimal.Decimal `json:"current_stock_price"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
 }
 
 var ErrStockHoldingNotFound = errors.New("stock holding not found")
@@ -31,42 +33,20 @@ func NewPortfolioStore(db DBTX) *PortfolioStore {
 	return &PortfolioStore{db: db}
 }
 
-func (ps *PortfolioStore) Init() error {
-	// Create table
-	query := `
-	CREATE TABLE IF NOT EXISTS portfolio (
-		id VARCHAR(255) PRIMARY KEY,
-		user_id VARCHAR(255) NOT NULL,
-		symbol VARCHAR(10) NOT NULL,
-		quantity INTEGER NOT NULL DEFAULT 0,
-		avg_price NUMERIC(15,2) NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(user_id, symbol)
-	);`
-
-	_, err := ps.db.Exec(query)
-	if err != nil {
-		return err
-	}
-
-	// Create index separately (PostgreSQL CREATE INDEX IF NOT EXISTS syntax)
-	indexQuery := `CREATE INDEX IF NOT EXISTS idx_portfolio_user_id ON portfolio(user_id);`
-	_, err = ps.db.Exec(indexQuery)
-	return err
-}
-
-// UpdatePortfolioWithBuy updates portfolio on buy order
-// Uses INSERT ... ON CONFLICT for atomic upsert in PostgreSQL
-func (ps *PortfolioStore) UpdatePortfolioWithBuy(userID, symbol string, quantity int, price float64) error {
-	// Check if portfolio entry exists
-	existing, err := ps.GetPortfolioBySymbol(userID, symbol)
+// UpdatePortfolioWithBuy updates portfolio on buy order. Uses
+// SELECT ... FOR UPDATE to lock any existing row so two concurrent buys of the
+// same (user, symbol) cannot both read stale quantity/avg_price and overwrite
+// each other's weighted average. The user-balance lock in InvestmentService
+// already serialises buys for the same user, but this lock keeps the store
+// safe in isolation.
+func (ps *PortfolioStore) UpdatePortfolioWithBuy(ctx context.Context, userID, symbol string, quantity int, price decimal.Decimal) error {
+	existing, err := ps.GetPortfolioBySymbolForUpdate(ctx, userID, symbol)
 	if err != nil && err != ErrStockHoldingNotFound {
 		return err
 	}
 
 	var newQuantity int
-	var newAvgPrice float64
+	var newAvgPrice decimal.Decimal
 	var portfolioID string
 
 	if existing == nil {
@@ -75,60 +55,58 @@ func (ps *PortfolioStore) UpdatePortfolioWithBuy(userID, symbol string, quantity
 		newQuantity = quantity
 		newAvgPrice = price
 	} else {
-		// Existing holding - calculate weighted average
+		// Existing holding - calculate weighted average using exact decimal arithmetic.
 		portfolioID = existing.ID
 		originalQuantity := existing.Quantity
 		newQuantity = existing.Quantity + quantity
-		newAvgPrice = (existing.AvgPrice*float64(originalQuantity) + price*float64(quantity)) / float64(newQuantity)
+		existingTotal := existing.AvgPrice.Mul(decimal.NewFromInt(int64(originalQuantity)))
+		addedTotal := price.Mul(decimal.NewFromInt(int64(quantity)))
+		newAvgPrice = existingTotal.Add(addedTotal).Div(decimal.NewFromInt(int64(newQuantity)))
 	}
 
 	// Use PostgreSQL INSERT ... ON CONFLICT for atomic upsert
 	query := `
 	INSERT INTO portfolio (id, user_id, symbol, quantity, avg_price, updated_at)
 	VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-	ON CONFLICT (user_id, symbol) 
-	DO UPDATE SET 
+	ON CONFLICT (user_id, symbol)
+	DO UPDATE SET
 		quantity = EXCLUDED.quantity,
 		avg_price = EXCLUDED.avg_price,
 		updated_at = CURRENT_TIMESTAMP`
 
-	_, err = ps.db.Exec(query, portfolioID, userID, symbol, newQuantity, newAvgPrice)
+	_, err = ps.db.ExecContext(ctx, query, portfolioID, userID, symbol, newQuantity, newAvgPrice)
 	return err
 }
 
-// UpdatePortfolioWithSell updates portfolio on sell order
-func (ps *PortfolioStore) UpdatePortfolioWithSell(userID, symbol string, quantity int) error {
-	existing, err := ps.GetPortfolioBySymbol(userID, symbol)
-	if err != nil {
-		if err == ErrStockHoldingNotFound {
-			return errors.New("stock holding not found")
-		}
-		return err
-	}
-
-	if quantity > existing.Quantity {
+// UpdatePortfolioWithSell decrements an existing holding by `quantity`,
+// deleting the row if the resulting quantity would be zero.
+//
+// The caller is responsible for fetching the current holding under FOR UPDATE
+// (see GetPortfolioBySymbolForUpdate) and validating that
+// quantity <= currentQuantity before calling this. Re-reading the row here
+// would be either redundant (the caller's lock makes the value unchanged) or
+// — if the lock is ever dropped — racy. Pass the locked currentQuantity in.
+func (ps *PortfolioStore) UpdatePortfolioWithSell(ctx context.Context, userID, symbol string, currentQuantity, quantity int) error {
+	if quantity > currentQuantity {
 		return errors.New("insufficient stock quantity to sell")
 	}
 
-	newQuantity := existing.Quantity - quantity
-
+	newQuantity := currentQuantity - quantity
 	if newQuantity == 0 {
-		// Delete the entry if quantity reaches zero
-		return ps.DeletePortfolio(userID, symbol)
+		return ps.DeletePortfolio(ctx, userID, symbol)
 	}
 
-	// Update quantity, keep avg_price unchanged
 	query := `UPDATE portfolio SET quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND symbol = $3`
-	_, err = ps.db.Exec(query, newQuantity, userID, symbol)
+	_, err := ps.db.ExecContext(ctx, query, newQuantity, userID, symbol)
 	return err
 }
 
 // GetPortfolioByUserID gets all holdings for a user
-func (ps *PortfolioStore) GetPortfolioByUserID(userID string) ([]UserStock, error) {
-	query := `SELECT id, user_id, symbol, quantity, avg_price, created_at, updated_at 
+func (ps *PortfolioStore) GetPortfolioByUserID(ctx context.Context, userID string) ([]UserStock, error) {
+	query := `SELECT id, user_id, symbol, quantity, avg_price, created_at, updated_at
 	          FROM portfolio WHERE user_id = $1 AND quantity > 0 ORDER BY symbol`
 
-	rows, err := ps.db.Query(query, userID)
+	rows, err := ps.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +128,7 @@ func (ps *PortfolioStore) GetPortfolioByUserID(userID string) ([]UserStock, erro
 			return nil, err
 		}
 		// Calculate derived fields
-		holding.Total = holding.AvgPrice * float64(holding.Quantity)
+		holding.Total = holding.AvgPrice.Mul(decimal.NewFromInt(int64(holding.Quantity)))
 		holdings = append(holdings, holding)
 	}
 
@@ -162,12 +140,23 @@ func (ps *PortfolioStore) GetPortfolioByUserID(userID string) ([]UserStock, erro
 }
 
 // GetPortfolioBySymbol gets a specific holding
-func (ps *PortfolioStore) GetPortfolioBySymbol(userID, symbol string) (*UserStock, error) {
-	query := `SELECT id, user_id, symbol, quantity, avg_price, created_at, updated_at 
-	          FROM portfolio WHERE user_id = $1 AND symbol = $2`
+func (ps *PortfolioStore) GetPortfolioBySymbol(ctx context.Context, userID, symbol string) (*UserStock, error) {
+	return ps.scanHolding(ctx, `SELECT id, user_id, symbol, quantity, avg_price, created_at, updated_at
+	          FROM portfolio WHERE user_id = $1 AND symbol = $2`, userID, symbol)
+}
 
+// GetPortfolioBySymbolForUpdate is GetPortfolioBySymbol with FOR UPDATE so the
+// caller's transaction holds the row lock until commit. Required inside
+// SellStock — without it, two concurrent sells of the same holding can both
+// pass the quantity check and oversell.
+func (ps *PortfolioStore) GetPortfolioBySymbolForUpdate(ctx context.Context, userID, symbol string) (*UserStock, error) {
+	return ps.scanHolding(ctx, `SELECT id, user_id, symbol, quantity, avg_price, created_at, updated_at
+	          FROM portfolio WHERE user_id = $1 AND symbol = $2 FOR UPDATE`, userID, symbol)
+}
+
+func (ps *PortfolioStore) scanHolding(ctx context.Context, query, userID, symbol string) (*UserStock, error) {
 	var holding UserStock
-	err := ps.db.QueryRow(query, userID, symbol).Scan(
+	err := ps.db.QueryRowContext(ctx, query, userID, symbol).Scan(
 		&holding.ID,
 		&holding.UserID,
 		&holding.Symbol,
@@ -176,24 +165,20 @@ func (ps *PortfolioStore) GetPortfolioBySymbol(userID, symbol string) (*UserStoc
 		&holding.CreatedAt,
 		&holding.UpdatedAt,
 	)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrStockHoldingNotFound
 		}
 		return nil, err
 	}
-
-	// Calculate derived fields
-	holding.Total = holding.AvgPrice * float64(holding.Quantity)
-
+	holding.Total = holding.AvgPrice.Mul(decimal.NewFromInt(int64(holding.Quantity)))
 	return &holding, nil
 }
 
 // DeletePortfolio removes a portfolio entry
-func (ps *PortfolioStore) DeletePortfolio(userID, symbol string) error {
+func (ps *PortfolioStore) DeletePortfolio(ctx context.Context, userID, symbol string) error {
 	query := `DELETE FROM portfolio WHERE user_id = $1 AND symbol = $2`
-	result, err := ps.db.Exec(query, userID, symbol)
+	result, err := ps.db.ExecContext(ctx, query, userID, symbol)
 	if err != nil {
 		return err
 	}
@@ -211,9 +196,8 @@ func (ps *PortfolioStore) DeletePortfolio(userID, symbol string) error {
 }
 
 // DeleteAllPortfolio removes all holdings for a user
-func (ps *PortfolioStore) DeleteAllPortfolio(userID string) error {
+func (ps *PortfolioStore) DeleteAllPortfolio(ctx context.Context, userID string) error {
 	query := `DELETE FROM portfolio WHERE user_id = $1`
-	_, err := ps.db.Exec(query, userID)
+	_, err := ps.db.ExecContext(ctx, query, userID)
 	return err
 }
-

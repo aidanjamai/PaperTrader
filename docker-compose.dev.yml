@@ -8,6 +8,7 @@ services:
     networks:
       - app-network
     environment:
+      - ENVIRONMENT=development  # base docker-compose.yml defaults to production; relax validators
       - PORT=8080
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
@@ -18,9 +19,19 @@ services:
       - REDIS_DB=0
       - RESEND_API_KEY=${RESEND_API_KEY}
       - FROM_EMAIL=${FROM_EMAIL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - MIGRATE_ON_START=true
     volumes:
       - ./backend:/app  # Mount source code for hot reload
     working_dir: /app
+    # `go run` compiles from scratch and needs much more RAM than the
+    # production binary; override the 256M limit set in docker-compose.yml.
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     # Dependencies are pre-installed in the image, just run the code
     command: go run main.go
     depends_on:

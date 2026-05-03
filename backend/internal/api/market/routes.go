@@ -11,23 +11,19 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func Routes(h *StockHandler, jwtService *service.JWTService, rateLimiter service.RateLimiter, cfg *config.Config) *mux.Router {
-	r := mux.NewRouter()
+// Mount attaches market routes to r (a subrouter, e.g. /api/market).
+func Mount(r *mux.Router, h *StockHandler, jwtService *service.JWTService, rateLimiter service.RateLimiter, cfg *config.Config) {
+	r.Use(auth.JWTMiddleware(jwtService, cfg))
 
-	// Apply JWT middleware to all market routes
-	r.Use(auth.JWTMiddleware(jwtService))
-
-	// Apply rate limiting middleware to routes that call MarketStack API
-	// Exclude batch endpoint from rate limiting since it reduces total API calls
+	// Rate-limit per-symbol endpoints; the batch endpoint is exempt because it
+	// reduces total upstream calls rather than amplifying them.
 	if rateLimiter != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				// Skip rate limiting for batch endpoint (it reduces API calls)
-				if req.URL.Path == "/stock/historical/daily/batch" {
+				if req.URL.Path == "/api/market/stock/historical/daily/batch" {
 					next.ServeHTTP(w, req)
 					return
 				}
-				// Apply rate limiting to other routes
 				middleware.RateLimitMiddleware(rateLimiter, cfg)(next).ServeHTTP(w, req)
 			})
 		})
@@ -36,7 +32,4 @@ func Routes(h *StockHandler, jwtService *service.JWTService, rateLimiter service
 	r.HandleFunc("/stock", h.GetStock).Methods("GET")
 	r.HandleFunc("/stock/historical/daily", h.GetStockHistoricalDataDaily).Methods("GET")
 	r.HandleFunc("/stock/historical/daily/batch", h.GetBatchHistoricalDataDaily).Methods("GET")
-	r.HandleFunc("/stock", h.PostStock).Methods("POST")
-	r.HandleFunc("/stock/symbol", h.DeleteStockBySymbol).Methods("DELETE")
-	return r
 }

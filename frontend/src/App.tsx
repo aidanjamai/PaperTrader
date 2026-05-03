@@ -9,10 +9,12 @@ import EmailVerificationBanner from './components/auth/EmailVerificationBanner';
 import Dashboard from './components/trading/Dashboard';
 import Home from './components/common/Home';
 import Trade from './components/trading/Trade';
+import History from './components/trading/History';
 import Markets from './components/trading/Markets';
 import Calculator from './components/tools/Calculator';
 import CompoundInterest from './components/tools/CompoundInterest';
 import { useAuth } from './hooks/useAuth';
+import { ThemeProvider } from './hooks/useTheme';
 import './App.css';
 
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -22,88 +24,100 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="container" style={{ textAlign: 'center', marginTop: '100px' }}>
-        <div className="card">
-          <h2>Loading...</h2>
-        </div>
-      </div>
+      <ThemeProvider>
+        <div className="app-loading">Loading…</div>
+      </ThemeProvider>
     );
   }
 
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <Router>
-        <div className="App">
-        <Navbar 
-          isAuthenticated={isAuthenticated} 
-          user={user}
-          onLogout={logout}
-        />
-        <div className="container">
-          {isAuthenticated && user && !user.email_verified && (
-            <EmailVerificationBanner email={user.email} />
-          )}
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route 
-              path="/login" 
-              element={
-                isAuthenticated ? 
-                <Navigate to="/dashboard" replace /> : 
-                <Login onLogin={login} />
-              } 
+    <ThemeProvider>
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <Router>
+          <div className="app-shell">
+            <Navbar
+              isAuthenticated={isAuthenticated}
+              user={user}
+              onLogout={logout}
             />
-            <Route 
-              path="/register" 
-              element={
-                isAuthenticated ? 
-                <Navigate to="/dashboard" replace /> : 
-                <Register onLogin={login} />
-              } 
-            />
-            <Route 
-              path="/verify-email" 
-              element={<VerifyEmail />} 
-            />
-            <Route 
-              path="/dashboard" 
-              element={
-                isAuthenticated && user ? 
-                <Dashboard /> : 
-                <Navigate to="/login" replace />
-              } 
-            />
-            <Route 
-              path="/trade" 
-              element={
-                isAuthenticated && user ? 
-                <Trade /> : 
-                <Navigate to="/login" replace />
-              }
-            />
-            <Route 
-              path="/markets" 
-              element={
-                isAuthenticated && user ? 
-                <Markets /> : 
-                <Navigate to="/login" replace />
-              }
-            />
-            <Route 
-              path="/calculator" 
-              element={<Calculator />} 
-            />
-            <Route 
-              path="/compound-interest" 
-              element={<CompoundInterest />} 
-            />
-          </Routes>
-        </div>
-      </div>
-      </Router>
-    </GoogleOAuthProvider>
+            <main className="app-main">
+              {isAuthenticated && user && !user.email_verified && (
+                <div className="container">
+                  <EmailVerificationBanner email={user.email} />
+                </div>
+              )}
+              <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route
+                    path="/login"
+                    element={
+                      isAuthenticated ? (
+                        <Navigate to="/dashboard" replace />
+                      ) : (
+                        <Login onLogin={login} />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/register"
+                    element={
+                      isAuthenticated ? (
+                        <Navigate to="/dashboard" replace />
+                      ) : (
+                        <Register onLogin={login} />
+                      )
+                    }
+                  />
+                  <Route path="/verify-email" element={<VerifyEmail />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      isAuthenticated && user ? (
+                        <Dashboard />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/trade"
+                    element={
+                      isAuthenticated && user ? (
+                        <Trade />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/markets"
+                    element={
+                      isAuthenticated && user ? (
+                        <Markets />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/history"
+                    element={
+                      isAuthenticated && user ? (
+                        <History />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
+                  <Route path="/calculator" element={<Calculator />} />
+                  <Route path="/compound-interest" element={<CompoundInterest />} />
+                </Routes>
+            </main>
+          </div>
+        </Router>
+      </GoogleOAuthProvider>
+    </ThemeProvider>
   );
 };
 
 export default App;
-
