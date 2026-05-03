@@ -46,16 +46,16 @@ const VerifyEmail: React.FC = () => {
   }, [searchParams, navigate, refreshUser, isAuthenticated]);
 
   return (
-    <div style={{ marginTop: '60px' }}>
+    <div className="container-narrow" style={{ paddingTop: 40 }}>
       <div className="card">
-        <h2>Email Verification</h2>
-        {status === 'verifying' && <p>Verifying your email...</p>}
-        {status === 'success' && (
-          <div className="alert alert-success">{message}</div>
+        <h2>Email verification</h2>
+        {status === 'verifying' && (
+          <p className="muted" style={{ textAlign: 'center', margin: 0 }}>
+            Verifying your email…
+          </p>
         )}
-        {status === 'error' && (
-          <div className="alert alert-error">{message}</div>
-        )}
+        {status === 'success' && <div className="alert alert-success">{message}</div>}
+        {status === 'error' && <div className="alert alert-error">{message}</div>}
       </div>
     </div>
   );

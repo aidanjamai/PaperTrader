@@ -1,8 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
-
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -15,14 +12,13 @@ RUN go mod download
 # Copy the source from the current directory to the Working Directory inside the container
 COPY . .
 
-# Build the Go app
-# CGO_ENABLED=1 is required for sqlite
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main .
+# Build a fully static binary — pure-Go drivers only, no cgo.
+RUN CGO_ENABLED=0 GOOS=linux go build -o main .
 
 # Start a new stage from scratch
-FROM alpine:latest  
+FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates sqlite wget && \
+RUN apk --no-cache add ca-certificates wget && \
     addgroup -g 1000 appuser && \
     adduser -D -u 1000 -G appuser appuser
 

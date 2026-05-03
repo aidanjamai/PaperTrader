@@ -1,5 +1,13 @@
 package investments
 
+import (
+	"papertrader/internal/data"
+)
+
+// BuyStockRequest / SellStockRequest are decoded from the JSON body of the
+// /buy and /sell endpoints. The optional `userId` field is accepted for
+// backwards compatibility but ignored; the authoritative user is whatever the
+// JWT middleware writes into X-User-ID.
 type BuyStockRequest struct {
 	UserID   string `json:"userId"`
 	Symbol   string `json:"symbol"`
@@ -12,21 +20,12 @@ type SellStockRequest struct {
 	Quantity int    `json:"quantity"`
 }
 
-type TradeResponse struct {
-	ID       string  `json:"id"`
-	Symbol   string  `json:"symbol"`
-	Action   string  `json:"action"`
-	Quantity int     `json:"quantity"`
-	Price    float64 `json:"price"`
-	Date     string  `json:"date"`
-}
-
-type UserStock struct {
-	ID       string  `json:"id"`
-	UserID   string  `json:"userId"`
-	Symbol   string  `json:"symbol"`
-	Quantity int     `json:"quantity"`
-	AvgPrice float64 `json:"avg_price"`
-	Total    float64 `json:"total"`
-	Profit   float64 `json:"profit"`
+// TradeHistoryResponse is the paginated payload returned by GET /investments/history.
+// Total is the count of all trades matching the filter (independent of limit/offset),
+// so the UI can render "showing 1-50 of 142" and decide whether Next is enabled.
+type TradeHistoryResponse struct {
+	Trades []data.Trade `json:"trades"`
+	Total  int          `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
 }

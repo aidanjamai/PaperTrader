@@ -3,7 +3,7 @@ package config
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -25,10 +25,10 @@ func ConnectPostgreSQL(cfg *Config) (*sql.DB, error) {
 
 	// Retry connection similar to MongoDB/Redis pattern
 	for i := 0; i < 5; i++ {
-		log.Printf("Attempting to connect to PostgreSQL (attempt %d/5)", i+1)
+		slog.Info("attempting to connect to PostgreSQL", "attempt", i+1, "max_attempts", 5)
 		err = db.Ping()
 		if err != nil {
-			log.Printf("Failed to ping PostgreSQL (attempt %d/5): %v", i+1, err)
+			slog.Warn("failed to ping PostgreSQL", "attempt", i+1, "max_attempts", 5, "err", err)
 			if i < 4 {
 				time.Sleep(5 * time.Second)
 				continue
@@ -37,10 +37,9 @@ func ConnectPostgreSQL(cfg *Config) (*sql.DB, error) {
 			return nil, fmt.Errorf("failed to connect to PostgreSQL after 5 attempts: %w", err)
 		}
 
-		log.Println("Connected to PostgreSQL successfully")
+		slog.Info("connected to PostgreSQL successfully")
 		return db, nil
 	}
 
 	return nil, fmt.Errorf("failed to connect to PostgreSQL")
 }
-

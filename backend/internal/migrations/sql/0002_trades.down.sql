@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS trades CASCADE;
+DROP FUNCTION IF EXISTS reject_trade_mutation();

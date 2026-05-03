@@ -1,20 +1,32 @@
 package account
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"papertrader/internal/config"
+	"papertrader/internal/data"
 	"papertrader/internal/service"
-	"papertrader/internal/util"
 	"time"
 )
 
+// AuthServicer is the subset of service.AuthService used by AccountHandler.
+// Using an interface here makes the handler trivially testable without a real DB.
+type AuthServicer interface {
+	Register(ctx context.Context, email, password string) (*data.User, string, error)
+	Login(ctx context.Context, email, password string) (*data.User, string, error)
+	GetUserByID(ctx context.Context, userID string) (*data.User, error)
+	VerifyEmail(ctx context.Context, token string) error
+	ResendVerificationEmail(ctx context.Context, email string) error
+	LoginWithGoogle(ctx context.Context, idToken string) (*data.User, string, error)
+}
+
 type AccountHandler struct {
-	AuthService *service.AuthService
+	AuthService AuthServicer
 	Config      *config.Config
 }
 
-func NewAccountHandler(authService *service.AuthService, cfg *config.Config) *AccountHandler {
+func NewAccountHandler(authService AuthServicer, cfg *config.Config) *AccountHandler {
 	return &AccountHandler{
 		AuthService: authService,
 		Config:      cfg,
@@ -106,7 +118,7 @@ func (h *AccountHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.AuthService.Register(req.Email, req.Password)
+	user, token, err := h.AuthService.Register(r.Context(), req.Email, req.Password)
 	if err != nil {
 		switch err.(type) {
 		case *service.EmailExistsError:
@@ -142,7 +154,7 @@ func (h *AccountHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.AuthService.Login(req.Email, req.Password)
+	user, token, err := h.AuthService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		switch err.(type) {
 		case *service.InvalidCredentialsError:
@@ -182,7 +194,7 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.AuthService.GetUserByID(userID)
+	user, err := h.AuthService.GetUserByID(r.Context(), userID)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
 		return
@@ -202,51 +214,18 @@ func (h *AccountHandler) IsAuthenticated(w http.ResponseWriter, r *http.Request)
 
 func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
-	user, err := h.AuthService.GetUserByID(userID)
+	if userID == "" {
+		h.writeErrorResponse(w, http.StatusUnauthorized, "User ID not found")
+		return
+	}
+
+	user, err := h.AuthService.GetUserByID(r.Context(), userID)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusNotFound, "User not found")
 		return
 	}
 
 	h.writeJSONResponse(w, http.StatusOK, user.Balance)
-}
-
-func (h *AccountHandler) UpdateBalance(w http.ResponseWriter, r *http.Request) {
-	var req UpdateBalanceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	// Override userID from the authenticated context
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		h.writeErrorResponse(w, http.StatusUnauthorized, "User not authenticated")
-		return
-	}
-
-	// Validate balance
-	if err := util.ValidateBalance(req.Balance); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	err := h.AuthService.UpdateBalance(userID, req.Balance)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to update balance")
-		return
-	}
-	h.writeJSONResponse(w, http.StatusOK, "Balance updated successfully")
-}
-
-func (h *AccountHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
-	// Optional: Add admin check here if needed
-	users, err := h.AuthService.GetAllUsers()
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get all users")
-		return
-	}
-	h.writeJSONResponse(w, http.StatusOK, GetAllUsersResponse{Users: users})
 }
 
 func (h *AccountHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +235,7 @@ func (h *AccountHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.AuthService.VerifyEmail(token)
+	err := h.AuthService.VerifyEmail(r.Context(), token)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid or expired verification token")
 		return
@@ -277,15 +256,18 @@ func (h *AccountHandler) ResendVerification(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err := h.AuthService.ResendVerificationEmail(req.Email)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
+	// Service swallows lookup failures by design — see ResendVerificationEmail.
+	// Any error returned here is a transport-layer failure we still want to
+	// surface, but the success message is identical regardless of whether the
+	// email matched a real account.
+	if err := h.AuthService.ResendVerificationEmail(r.Context(), req.Email); err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Could not process request")
 		return
 	}
 
 	h.writeJSONResponse(w, http.StatusOK, AuthResponse{
 		Success: true,
-		Message: "Verification email sent",
+		Message: "If an account with that email exists and is not yet verified, a verification email has been sent",
 	})
 }
 
@@ -304,7 +286,7 @@ func (h *AccountHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.AuthService.LoginWithGoogle(req.Token)
+	user, token, err := h.AuthService.LoginWithGoogle(r.Context(), req.Token)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusUnauthorized, "Google authentication failed")
 		return

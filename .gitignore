@@ -131,3 +131,13 @@ backend.tar
 
 # Go workspace file
 go.work
+
+# AI-generated docs
+docs/RECOMMENDATIONS.md
+docs/CORRECTNESS.md
+docs/plan.md
+docs/ai-plan.md
+docs/OPTIMIZATIONS.md
+
+# Design handoff (local-only)
+design_handoff_papertrader_theme/

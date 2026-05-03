@@ -1,4 +1,6 @@
 import React, { useState, ChangeEvent } from 'react';
+import { formatMoney, formatSignedMoney } from '../primitives/format';
+import ToolsTabs from './ToolsTabs';
 
 interface CompoundInterestResult {
   futureValue: number;
@@ -14,139 +16,153 @@ const CompoundInterest: React.FC = () => {
   const [result, setResult] = useState<CompoundInterestResult | null>(null);
 
   const calculateCompoundInterest = () => {
-    // Convert inputs to numbers
-    const P = parseFloat(startingBalance) || 0;  // Initial principal
-    const PMT = parseFloat(monthlyContribution) || 0;  // Monthly contribution
-    const t = parseFloat(years) || 0;  // Time in years
-    const r = parseFloat(interestRate) / 100 || 0;  // Annual interest rate (convert % to decimal)
-    const n = 12;  // Compound monthly
+    const P = parseFloat(startingBalance) || 0;
+    const PMT = parseFloat(monthlyContribution) || 0;
+    const t = parseFloat(years) || 0;
+    const r = parseFloat(interestRate) / 100 || 0;
+    const n = 12;
 
-    // Formula: A = P(1+r/n)^(nt) + PMT[((1+r/n)^(nt)-1)/(r/n)]
     const compoundFactor = Math.pow(1 + r / n, n * t);
-    
-    // Future value from initial principal
     const principalWithInterest = P * compoundFactor;
-    
-    // Future value from monthly contributions
     let contributionsWithInterest = 0;
     if (r > 0) {
       contributionsWithInterest = PMT * ((compoundFactor - 1) / (r / n));
     } else {
-      // If interest rate is 0, just sum the contributions
       contributionsWithInterest = PMT * n * t;
     }
-    
+
     const futureValue = principalWithInterest + contributionsWithInterest;
-    const totalContributions = P + (PMT * n * t);
+    const totalContributions = P + PMT * n * t;
     const interestEarned = futureValue - totalContributions;
 
-    setResult({
-      futureValue: futureValue,
-      totalContributions: totalContributions,
-      interestEarned: interestEarned
-    });
+    setResult({ futureValue, totalContributions, interestEarned });
   };
 
   return (
-    <div style={{ marginTop: '60px' }}>
-      <div className="card">
-        <h2>Compound Interest Calculator</h2>
-        <p style={{ color: '#666', marginBottom: '24px' }}>
-          Calculate the future value of your investment with monthly contributions
+    <div className="container-narrow" style={{ paddingTop: 24 }}>
+      <header className="page-header">
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>
+            Tools · projection
+          </div>
+          <h1>Compound interest</h1>
+        </div>
+      </header>
+
+      <ToolsTabs />
+
+      <div className="panel" style={{ padding: 28 }}>
+        <p className="muted" style={{ marginTop: 0, marginBottom: 24, fontSize: 14 }}>
+          Project the future value of an investment with monthly contributions.
         </p>
 
         <div className="form-group">
-          <label htmlFor="startingBalance">Initial Investment ($)</label>
+          <label htmlFor="startingBalance" className="form-label">
+            Initial investment ($)
+          </label>
           <input
             type="number"
             id="startingBalance"
-            className="form-control"
+            className="input mono"
             value={startingBalance}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setStartingBalance(e.target.value)}
-            placeholder="e.g., 1000"
+            placeholder="1000"
             step="0.01"
           />
         </div>
 
         <div className="form-group">
-          <label htmlFor="monthlyContribution">Monthly Contribution ($)</label>
+          <label htmlFor="monthlyContribution" className="form-label">
+            Monthly contribution ($)
+          </label>
           <input
             type="number"
             id="monthlyContribution"
-            className="form-control"
+            className="input mono"
             value={monthlyContribution}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setMonthlyContribution(e.target.value)}
-            placeholder="e.g., 100"
+            placeholder="100"
             step="0.01"
           />
         </div>
 
         <div className="form-group">
-          <label htmlFor="years">Time Period (Years)</label>
+          <label htmlFor="years" className="form-label">
+            Time period (years)
+          </label>
           <input
             type="number"
             id="years"
-            className="form-control"
+            className="input mono"
             value={years}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setYears(e.target.value)}
-            placeholder="e.g., 10"
+            placeholder="10"
             step="0.1"
           />
         </div>
 
         <div className="form-group">
-          <label htmlFor="interestRate">Annual Interest Rate (%)</label>
+          <label htmlFor="interestRate" className="form-label">
+            Annual interest rate (%)
+          </label>
           <input
             type="number"
             id="interestRate"
-            className="form-control"
+            className="input mono"
             value={interestRate}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setInterestRate(e.target.value)}
-            placeholder="e.g., 7"
+            placeholder="7"
             step="0.01"
           />
         </div>
 
         <button
-          onClick={calculateCompoundInterest}
-          className="btn btn-primary"
-          style={{ width: '100%' }}
           type="button"
+          onClick={calculateCompoundInterest}
+          className="btn btn-primary btn-block"
         >
           Calculate
         </button>
 
         {result && (
-          <div style={{ marginTop: '32px', padding: '20px', background: '#f8f9fa', borderRadius: '8px' }}>
-            <h3 style={{ color: '#667eea', marginBottom: '16px' }}>Results</h3>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #ddd' }}>
-                <span style={{ fontWeight: 'bold', color: '#333' }}>Future Value:</span>
-                <span style={{ fontSize: '18px', color: '#667eea', fontWeight: 'bold' }}>
-                  ${result.futureValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #ddd' }}>
-                <span style={{ color: '#666' }}>Total Contributions:</span>
-                <span style={{ fontWeight: '500' }}>
-                  ${result.totalContributions.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-                <span style={{ color: '#666' }}>Interest Earned:</span>
-                <span style={{ fontWeight: '500', color: result.interestEarned >= 0 ? '#28a745' : '#dc3545' }}>
-                  ${result.interestEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
+          <div
+            style={{
+              marginTop: 28,
+              padding: '20px 22px',
+              border: '1px solid var(--hairline)',
+              borderRadius: 8,
+              background: 'var(--canvas)',
+            }}
+          >
+            <div className="eyebrow" style={{ marginBottom: 12 }}>
+              Result
             </div>
-
-            <div style={{ marginTop: '16px', padding: '12px', background: '#fff', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
-              <strong>Formula used:</strong> A = P(1+r/n)^(nt) + PMT[((1+r/n)^(nt)-1)/(r/n)]
-              <br />
-              <small>Where n = 12 (monthly compounding)</small>
+            <div className="display-num" style={{ fontSize: 44 }}>
+              <span className="currency">$</span>
+              <span className="num">{formatMoney(result.futureValue)}</span>
+            </div>
+            <div
+              className="mono"
+              style={{ fontSize: 13, marginTop: 14, display: 'grid', rowGap: 6 }}
+            >
+              <Row label="Total contributions" value={`$${formatMoney(result.totalContributions)}`} />
+              <Row
+                label="Interest earned"
+                value={`${formatSignedMoney(result.interestEarned)}`}
+                tone={result.interestEarned >= 0 ? 'gain' : 'loss'}
+              />
+            </div>
+            <div
+              className="mono"
+              style={{
+                marginTop: 16,
+                fontSize: 11,
+                color: 'var(--ink-muted)',
+                paddingTop: 12,
+                borderTop: '1px solid var(--hairline)',
+              }}
+            >
+              A = P(1+r/n)^(nt) + PMT × ((1+r/n)^(nt) − 1)/(r/n) · n = 12
             </div>
           </div>
         )}
@@ -155,5 +171,22 @@ const CompoundInterest: React.FC = () => {
   );
 };
 
-export default CompoundInterest;
+const Row: React.FC<{ label: string; value: string; tone?: 'gain' | 'loss' }> = ({
+  label,
+  value,
+  tone,
+}) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <span style={{ color: 'var(--ink-muted)' }}>{label}</span>
+    <span
+      style={{
+        color: tone === 'gain' ? 'var(--gain)' : tone === 'loss' ? 'var(--loss)' : 'var(--ink)',
+        fontWeight: 500,
+      }}
+    >
+      {value}
+    </span>
+  </div>
+);
 
+export default CompoundInterest;

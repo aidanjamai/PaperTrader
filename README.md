@@ -59,15 +59,12 @@ PaperTrader is a simulated stock trading platform that provides:
 - **Language**: TypeScript 5.9.3
 - **Routing**: React Router DOM 6.3.0
 - **Build Tool**: Create React App (react-scripts 5.0.1)
-- **UI Framework**: Bootstrap 5.3.8
-- **Component Library**: React Bootstrap 2.10.10
 - **HTTP Client**: Fetch API with type-safe wrappers
 
 **Key Frontend Libraries**:
 - `react` & `react-dom` - UI framework
 - `react-router-dom` - Client-side routing
 - `typescript` - Type safety
-- `bootstrap` & `react-bootstrap` - UI styling and components
 
 ### Infrastructure
 
@@ -217,7 +214,6 @@ PaperTrader/
 │       │   ├── trade.go              # Trade model
 │       │   ├── trade_store.go        # Trade database operations
 │       │   ├── portfolio_store.go    # Portfolio/holdings operations
-│       │   ├── stock_store.go        # Stock management operations
 │       │   └── dbtx.go               # Database transaction interface
 │       └── service/                  # Business logic layer
 │           ├── auth.go               # Authentication service
@@ -373,7 +369,7 @@ The frontend will start at `http://localhost:3000` and proxy API requests to `ht
 
 ## API Documentation
 
-Complete API documentation is available in [API.md](API.md).
+Complete API documentation is available in [API.md](docs/API.md).
 
 The API provides endpoints for:
 - **Authentication** - User registration, login, logout, and profile management
@@ -386,7 +382,7 @@ All endpoints use JSON for request/response bodies and JWT tokens for authentica
 
 ## Database Schema
 
-Complete database schema documentation is available in [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md).
+Complete database schema documentation is available in [DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md).
 
 The database consists of:
 - **PostgreSQL** - Primary database for users, trades, and portfolio data
@@ -396,7 +392,6 @@ Key tables:
 - `users` - User accounts and authentication
 - `trades` - Transaction history (event log)
 - `portfolio` - Current stock holdings (materialized view)
-- `stocks` - Stock metadata (optional)
 
 ---
 

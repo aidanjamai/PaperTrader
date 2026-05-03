@@ -1,24 +1,29 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"math"
+	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
+
+	"papertrader/internal/util"
 )
 
 const (
 	MarketStackTimeout = 30 * time.Second
-	DateLayoutUS       = "01/02/2006"
-	DateLayoutAPI      = "2006-01-02"
-	APIDateLayout      = "2006-01-02T15:04:05+0000"
-	MaxSymbolLength    = 10
-	MinPrice           = 0.01
+	// DateLayoutUS is the user-facing date format (MM/DD/YYYY) we surface in API responses.
+	DateLayoutUS = "01/02/2006"
+	// DateLayoutISO is the wire format MarketStack expects on date_from / date_to query parameters.
+	DateLayoutISO = "2006-01-02"
+	// DateLayoutMarketStack is the timestamp format MarketStack returns on response payloads.
+	DateLayoutMarketStack = "2006-01-02T15:04:05+0000"
+	MaxSymbolLength       = 10
 )
 
 type MarketService struct {
@@ -37,25 +42,24 @@ func NewMarketService(apiKey string, stockCache StockCache, historicalCache Hist
 
 // DTOs for Service Layer
 type StockData struct {
-	Symbol string  `json:"symbol"`
-	Date   string  `json:"date"`
-	Price  float64 `json:"price"`
+	Symbol string          `json:"symbol"`
+	Date   string          `json:"date"`
+	Price  decimal.Decimal `json:"price"`
 }
 
 type HistoricalData struct {
-	Symbol           string  `json:"symbol"`
-	Date             string  `json:"date"`
-	PreviousPrice    float64 `json:"previous_price"`
-	Price            float64 `json:"price"`
-	Volume           int     `json:"volume"`
-	Change           float64 `json:"change"`
-	ChangePercentage float64 `json:"change_percentage"`
+	Symbol           string          `json:"symbol"`
+	Date             string          `json:"date"`
+	PreviousPrice    decimal.Decimal `json:"previous_price"`
+	Price            decimal.Decimal `json:"price"`
+	Volume           int             `json:"volume"`
+	Change           decimal.Decimal `json:"change"`
+	ChangePercentage decimal.Decimal `json:"change_percentage"`
 }
 
 // GetStock retrieves stock data by symbol
-func (s *MarketService) GetStock(symbol string) (*StockData, error) {
-	symbol = sanitizeString(symbol)
-	symbol, err := validateSymbol(symbol)
+func (s *MarketService) GetStock(ctx context.Context, symbol string) (*StockData, error) {
+	symbol, err := util.ValidateSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -64,14 +68,14 @@ func (s *MarketService) GetStock(symbol string) (*StockData, error) {
 
 	// Check Redis cache first
 	if s.stockCache != nil {
-		cachedData, err := s.stockCache.GetStock(symbol, today)
+		cachedData, err := s.stockCache.GetStock(ctx, symbol, today)
 		if err == nil && cachedData != nil {
-			log.Printf("[MarketService] GetStock CACHE HIT for %s (date: %s)", symbol, today)
+			slog.Debug("stock cache hit", "symbol", symbol, "date", today)
 			return cachedData, nil
 		}
-		log.Printf("[MarketService] GetStock CACHE MISS for %s (date: %s) - fetching from MarketStack API", symbol, today)
+		slog.Debug("stock cache miss", "symbol", symbol, "date", today)
 	} else {
-		log.Printf("[MarketService] GetStock CACHE UNAVAILABLE for %s - fetching from MarketStack API", symbol)
+		slog.Warn("stock cache unavailable", "symbol", symbol, "component", "market")
 	}
 
 	// Cache miss - fetch from external API
@@ -79,19 +83,16 @@ func (s *MarketService) GetStock(symbol string) (*StockData, error) {
 		return nil, fmt.Errorf("API key not configured")
 	}
 
-	log.Printf("[MarketService] GetStock API CALL to MarketStack for %s", symbol)
-	stockData, err := s.fetchStockData(symbol)
+	stockData, err := s.fetchStockData(ctx, symbol)
 	if err != nil {
-		log.Printf("[MarketService] GetStock API CALL FAILED for %s: %v", symbol, err)
+		slog.Warn("MarketStack API call failed for GetStock", "symbol", symbol, "err", err)
 		return nil, err
 	}
 
 	// Cache the result in Redis
 	if s.stockCache != nil {
-		if err := s.stockCache.SetStock(stockData.Symbol, stockData.Date, stockData, 0); err != nil {
-			log.Printf("[MarketService] GetStock: failed to cache result in Redis: %v", err)
-		} else {
-			log.Printf("[MarketService] GetStock CACHED result for %s (date: %s, price: $%.2f)", symbol, stockData.Date, stockData.Price)
+		if err := s.stockCache.SetStock(ctx, stockData.Symbol, stockData.Date, stockData, 0); err != nil {
+			slog.Warn("failed to cache stock result", "symbol", symbol, "err", err, "component", "market")
 		}
 	}
 
@@ -100,7 +101,7 @@ func (s *MarketService) GetStock(symbol string) (*StockData, error) {
 
 // GetBatchHistoricalData retrieves historical data for multiple symbols in a single request
 // This is more efficient than making individual requests for each symbol
-func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*HistoricalData, error) {
+func (s *MarketService) GetBatchHistoricalData(ctx context.Context, symbols []string) (map[string]*HistoricalData, error) {
 	if len(symbols) == 0 {
 		return make(map[string]*HistoricalData), nil
 	}
@@ -108,9 +109,9 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 	// Validate all symbols first
 	validatedSymbols := make([]string, 0, len(symbols))
 	for _, symbol := range symbols {
-		validated, err := validateSymbol(symbol)
+		validated, err := util.ValidateSymbol(symbol)
 		if err != nil {
-			log.Printf("[MarketService] GetBatchHistoricalData: invalid symbol %s: %v", symbol, err)
+			slog.Debug("skipping invalid symbol in batch", "symbol", symbol, "err", err)
 			continue
 		}
 		validatedSymbols = append(validatedSymbols, validated)
@@ -123,8 +124,8 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 	now := time.Now()
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	yesterday := now.AddDate(0, 0, -1)
-	startDate := sevenDaysAgo.Format(DateLayoutAPI)
-	endDate := yesterday.Format(DateLayoutAPI)
+	startDate := sevenDaysAgo.Format(DateLayoutISO)
+	endDate := yesterday.Format(DateLayoutISO)
 
 	// Check cache for all symbols first
 	result := make(map[string]*HistoricalData)
@@ -132,9 +133,9 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 
 	for _, symbol := range validatedSymbols {
 		if s.historicalCache != nil {
-			cachedData, err := s.historicalCache.GetHistorical(symbol, startDate, endDate)
+			cachedData, err := s.historicalCache.GetHistorical(ctx, symbol, startDate, endDate)
 			if err == nil && cachedData != nil {
-				log.Printf("[MarketService] GetBatchHistoricalData CACHE HIT for %s", symbol)
+				slog.Debug("historical cache hit", "symbol", symbol)
 				result[symbol] = cachedData
 				continue
 			}
@@ -144,14 +145,16 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 
 	// If all symbols were cached, return early
 	if len(symbolsToFetch) == 0 {
-		log.Printf("[MarketService] GetBatchHistoricalData: all %d symbols served from cache", len(validatedSymbols))
+		slog.Debug("all symbols served from historical cache", "count", len(validatedSymbols))
 		return result, nil
 	}
 
-	log.Printf("[MarketService] GetBatchHistoricalData: fetching %d symbols from API (cached: %d)", len(symbolsToFetch), len(validatedSymbols)-len(symbolsToFetch))
+	slog.Debug("fetching symbols from MarketStack API",
+		"fetch_count", len(symbolsToFetch),
+		"cached_count", len(validatedSymbols)-len(symbolsToFetch),
+	)
 
 	// Fetch remaining symbols from API in batches (MarketStack supports up to 5 symbols per request on free tier)
-	// For production, you might want to check your MarketStack plan limits
 	const batchSize = 5
 	for i := 0; i < len(symbolsToFetch); i += batchSize {
 		end := i + batchSize
@@ -160,9 +163,9 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 		}
 		batch := symbolsToFetch[i:end]
 
-		batchData, err := s.fetchBatchHistoricalStockData(batch, startDate, endDate)
+		batchData, err := s.fetchBatchHistoricalStockData(ctx, batch, startDate, endDate)
 		if err != nil {
-			log.Printf("[MarketService] GetBatchHistoricalData: batch fetch failed for symbols %v: %v", batch, err)
+			slog.Warn("batch historical fetch failed", "symbols", batch, "err", err, "component", "market")
 			// Continue with other batches even if one fails
 			continue
 		}
@@ -171,25 +174,25 @@ func (s *MarketService) GetBatchHistoricalData(symbols []string) (map[string]*Hi
 		for symbol, data := range batchData {
 			result[symbol] = data
 			if s.historicalCache != nil {
-				if err := s.historicalCache.SetHistorical(symbol, startDate, endDate, data, 0); err != nil {
-					log.Printf("[MarketService] GetBatchHistoricalData: failed to cache %s: %v", symbol, err)
+				if err := s.historicalCache.SetHistorical(ctx, symbol, startDate, endDate, data, 0); err != nil {
+					slog.Warn("failed to cache historical result", "symbol", symbol, "err", err, "component", "market")
 				}
 			}
 		}
 	}
 
-	log.Printf("[MarketService] GetBatchHistoricalData: completed, returning %d symbols", len(result))
+	slog.Debug("GetBatchHistoricalData completed", "returned_count", len(result))
 	return result, nil
 }
 
 // fetchBatchHistoricalStockData fetches historical data for multiple symbols in one API call
-func (s *MarketService) fetchBatchHistoricalStockData(symbols []string, startDate, endDate string) (map[string]*HistoricalData, error) {
+func (s *MarketService) fetchBatchHistoricalStockData(ctx context.Context, symbols []string, startDate, endDate string) (map[string]*HistoricalData, error) {
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("API key not configured")
 	}
 
 	const baseURL = "https://api.marketstack.com/v1/eod"
-	httpReq, err := http.NewRequest("GET", baseURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", baseURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +258,7 @@ func (s *MarketService) fetchBatchHistoricalStockData(symbols []string, startDat
 	for _, symbol := range symbols {
 		data, exists := symbolData[symbol]
 		if !exists || len(data) < 2 {
-			log.Printf("[MarketService] fetchBatchHistoricalStockData: insufficient data for %s (got %d days)", symbol, len(data))
+			slog.Debug("insufficient data for symbol in batch", "symbol", symbol, "days_returned", len(data))
 			continue
 		}
 
@@ -264,75 +267,41 @@ func (s *MarketService) fetchBatchHistoricalStockData(symbols []string, startDat
 		latest := data[0]
 		previous := data[1]
 
-		priceChange := latest.Close - previous.Close
-		changePercent := (priceChange / previous.Close) * 100
+		// Convert from float64 (external API) to decimal at the boundary.
+		// -2 exponent snaps to 2dp (stock prices are natively 2dp).
+		latestDec := decimal.NewFromFloatWithExponent(latest.Close, -2)
+		prevDec := decimal.NewFromFloatWithExponent(previous.Close, -2)
 
-		parsedDate, err := time.Parse(APIDateLayout, latest.Date)
+		priceChange := latestDec.Sub(prevDec)
+		var changePercent decimal.Decimal
+		if !prevDec.IsZero() {
+			changePercent = priceChange.Div(prevDec).Mul(decimal.NewFromInt(100)).Round(2)
+		}
+
+		parsedDate, err := time.Parse(DateLayoutMarketStack, latest.Date)
 		if err != nil {
-			log.Printf("[MarketService] fetchBatchHistoricalStockData: failed to parse date for %s: %v", symbol, err)
+			slog.Warn("failed to parse date for symbol", "symbol", symbol, "err", err, "component", "market")
 			continue
 		}
 
 		result[symbol] = &HistoricalData{
 			Symbol:           symbol,
 			Date:             parsedDate.Format(DateLayoutUS),
-			PreviousPrice:    previous.Close,
-			Price:            latest.Close,
+			PreviousPrice:    prevDec,
+			Price:            latestDec,
 			Volume:           int(latest.Volume),
-			Change:           math.Round(priceChange*100) / 100,
-			ChangePercentage: math.Round(changePercent*100) / 100,
+			Change:           priceChange.Round(2),
+			ChangePercentage: changePercent,
 		}
-
-		log.Printf("[MarketService] fetchBatchHistoricalStockData: processed %s (price: $%.2f, change: $%.2f, change%%: %.2f%%)", symbol, result[symbol].Price, result[symbol].Change, result[symbol].ChangePercentage)
 	}
 
 	return result, nil
 }
 
-func (s *MarketService) SaveStock(symbol string, price float64) error {
-	symbol = sanitizeString(symbol)
-	symbol, err := validateSymbol(symbol)
-	if err != nil {
-		return err
-	}
-	if err := validatePrice(price); err != nil {
-		return err
-	}
-
-	today := time.Now().Format(DateLayoutUS)
-
-	// Invalidate Redis cache for this symbol
-	if s.stockCache != nil {
-		s.stockCache.InvalidateStock(symbol)
-}
-
-	// Update Redis cache with new price
-	if s.stockCache != nil {
-		stockData := &StockData{
-			Symbol: symbol,
-			Price:  price,
-			Date:   today,
-		}
-		if err := s.stockCache.SetStock(symbol, today, stockData, 0); err != nil {
-			log.Printf("SaveStock: failed to update Redis cache: %v", err)
-		}
-	}
-
-	return nil
-}
-
-func (s *MarketService) DeleteStockBySymbol(symbol string) error {
-	// Invalidate Redis cache for this symbol (force refresh from API on next request)
-	if s.stockCache != nil {
-		return s.stockCache.InvalidateStock(symbol)
-}
-	return nil
-}
-
 // GetHistoricalData retrieves historical data
 // Requests last 7 days to ensure we get at least 2 trading days (accounting for weekends/holidays)
-func (s *MarketService) GetHistoricalData(symbol string) (*HistoricalData, error) {
-	symbol, err := validateSymbol(symbol)
+func (s *MarketService) GetHistoricalData(ctx context.Context, symbol string) (*HistoricalData, error) {
+	symbol, err := util.ValidateSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -341,32 +310,29 @@ func (s *MarketService) GetHistoricalData(symbol string) (*HistoricalData, error
 	// Request last 7 days to ensure we get at least 2 trading days even over weekends/holidays
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	yesterday := now.AddDate(0, 0, -1)
-	startDate := sevenDaysAgo.Format(DateLayoutAPI)
-	endDate := yesterday.Format(DateLayoutAPI)
+	startDate := sevenDaysAgo.Format(DateLayoutISO)
+	endDate := yesterday.Format(DateLayoutISO)
 
 	// Check Redis cache first
-	// Use a cache key that represents "recent historical data" (not date-specific)
-	// This allows cache hits even if the exact date range varies slightly
 	if s.historicalCache != nil {
-		cachedData, err := s.historicalCache.GetHistorical(symbol, startDate, endDate)
+		cachedData, err := s.historicalCache.GetHistorical(ctx, symbol, startDate, endDate)
 		if err == nil && cachedData != nil {
-			log.Printf("[MarketService] GetHistoricalData CACHE HIT for %s (range: %s to %s)", symbol, startDate, endDate)
+			slog.Debug("historical cache hit", "symbol", symbol, "start_date", startDate, "end_date", endDate)
 			return cachedData, nil
 		}
-		log.Printf("[MarketService] GetHistoricalData CACHE MISS for %s (range: %s to %s) - fetching from MarketStack API", symbol, startDate, endDate)
+		slog.Debug("historical cache miss", "symbol", symbol, "start_date", startDate, "end_date", endDate)
 	} else {
-		log.Printf("[MarketService] GetHistoricalData CACHE UNAVAILABLE for %s - fetching from MarketStack API", symbol)
+		slog.Warn("historical cache unavailable", "symbol", symbol, "component", "market")
 	}
 
 	// Cache miss - fetch from API
-	log.Printf("[MarketService] GetHistoricalData API CALL to MarketStack for %s (range: %s to %s)", symbol, startDate, endDate)
-	return s.fetchHistoricalStockData(symbol, startDate, endDate)
+	return s.fetchHistoricalStockData(ctx, symbol, startDate, endDate)
 }
 
 // Private helpers
-func (s *MarketService) fetchStockData(symbol string) (*StockData, error) {
+func (s *MarketService) fetchStockData(ctx context.Context, symbol string) (*StockData, error) {
 	const baseURL = "https://api.marketstack.com/v1/eod/latest"
-	httpReq, err := http.NewRequest("GET", baseURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", baseURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -410,21 +376,24 @@ func (s *MarketService) fetchStockData(symbol string) (*StockData, error) {
 	}
 
 	entry := apiResp.Data[0]
-	parsedDate, _ := time.Parse(time.RFC3339, entry.Date) // simplified error handling for brevity
+	parsedDate, err := time.Parse(DateLayoutMarketStack, entry.Date)
+	if err != nil {
+		return nil, fmt.Errorf("parse date %q: %w", entry.Date, err)
+	}
 
 	stockData := &StockData{
 		Symbol: entry.Symbol,
-		Price:  entry.Close,
+		Price:  decimal.NewFromFloatWithExponent(entry.Close, -2),
 		Date:   parsedDate.Format(DateLayoutUS),
 	}
-	
-	log.Printf("[MarketService] GetStock API CALL SUCCESS for %s from MarketStack (price: $%.2f, date: %s)", symbol, stockData.Price, stockData.Date)
+
+	slog.Info("MarketStack API call succeeded for GetStock", "symbol", symbol, "price", stockData.Price, "date", stockData.Date)
 	return stockData, nil
 }
 
-func (s *MarketService) fetchHistoricalStockData(symbol, startDate, endDate string) (*HistoricalData, error) {
+func (s *MarketService) fetchHistoricalStockData(ctx context.Context, symbol, startDate, endDate string) (*HistoricalData, error) {
 	const baseURL = "https://api.marketstack.com/v1/eod"
-	httpReq, err := http.NewRequest("GET", baseURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", baseURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -455,8 +424,8 @@ func (s *MarketService) fetchHistoricalStockData(symbol, startDate, endDate stri
 	}
 
 	if len(apiResp.Data) < 2 {
-		log.Printf("[MarketService] GetHistoricalData API CALL FAILED for %s: insufficient data (got %d days, need 2)", symbol, len(apiResp.Data))
-		return nil, fmt.Errorf("insufficient data")
+		slog.Warn("insufficient historical data from MarketStack", "symbol", symbol, "days_returned", len(apiResp.Data), "days_needed", 2)
+		return nil, &InsufficientHistoricalDataError{}
 	}
 
 	// MarketStack returns data sorted by date (most recent first)
@@ -464,53 +433,46 @@ func (s *MarketService) fetchHistoricalStockData(symbol, startDate, endDate stri
 	// This works even if there were weekends/holidays in the date range
 	latest := apiResp.Data[0]
 	previous := apiResp.Data[1]
-	priceChange := latest.Close - previous.Close
-	changePercent := (priceChange / previous.Close) * 100
 
-	parsedDate, _ := time.Parse(APIDateLayout, latest.Date)
+	// Convert from float64 (external API) to decimal at the boundary.
+	latestDec := decimal.NewFromFloatWithExponent(latest.Close, -2)
+	prevDec := decimal.NewFromFloatWithExponent(previous.Close, -2)
+
+	priceChange := latestDec.Sub(prevDec)
+	var changePercent decimal.Decimal
+	if !prevDec.IsZero() {
+		changePercent = priceChange.Div(prevDec).Mul(decimal.NewFromInt(100)).Round(2)
+	}
+
+	parsedDate, err := time.Parse(DateLayoutMarketStack, latest.Date)
+	if err != nil {
+		return nil, fmt.Errorf("parse latest date %q: %w", latest.Date, err)
+	}
 
 	response := &HistoricalData{
 		Symbol:           symbol,
 		Date:             parsedDate.Format(DateLayoutUS),
-		PreviousPrice:    previous.Close,
-		Price:            latest.Close,
+		PreviousPrice:    prevDec,
+		Price:            latestDec,
 		Volume:           int(latest.Volume),
-		Change:           math.Round(priceChange*100) / 100,
-		ChangePercentage: math.Round(changePercent*100) / 100,
+		Change:           priceChange.Round(2),
+		ChangePercentage: changePercent,
 	}
-	
-	log.Printf("[MarketService] GetHistoricalData API CALL SUCCESS for %s from MarketStack (price: $%.2f, change: $%.2f, change%%: %.2f%%, got %d trading days)", symbol, response.Price, response.Change, response.ChangePercentage, len(apiResp.Data))
+
+	slog.Info("MarketStack API call succeeded for GetHistoricalData",
+		"symbol", symbol,
+		"price", response.Price,
+		"change", response.Change,
+		"change_pct", response.ChangePercentage,
+		"trading_days", len(apiResp.Data),
+	)
 
 	// Cache in Redis
 	if s.historicalCache != nil {
-		if err := s.historicalCache.SetHistorical(symbol, startDate, endDate, response, 0); err != nil {
-			log.Printf("[MarketService] fetchHistoricalStockData: failed to cache result in Redis: %v", err)
-		} else {
-			log.Printf("[MarketService] GetHistoricalData CACHED result for %s (price: $%.2f, change: $%.2f, change%%: %.2f%%)", symbol, response.Price, response.Change, response.ChangePercentage)
+		if err := s.historicalCache.SetHistorical(ctx, symbol, startDate, endDate, response, 0); err != nil {
+			slog.Warn("failed to cache historical result", "symbol", symbol, "err", err, "component", "market")
 		}
 	}
 
 	return response, nil
-}
-
-// Helpers
-var symbolRegex = regexp.MustCompile(`^[A-Z]{1,10}(\.[A-Z]{1,2})?$`)
-
-func validateSymbol(symbol string) (string, error) {
-	symbol = strings.TrimSpace(strings.ToUpper(symbol))
-	if !symbolRegex.MatchString(symbol) {
-		return "", fmt.Errorf("invalid symbol")
-	}
-	return symbol, nil
-}
-
-func validatePrice(price float64) error {
-	if price < MinPrice {
-		return fmt.Errorf("price too low")
-	}
-	return nil
-}
-
-func sanitizeString(input string) string {
-	return strings.TrimSpace(strings.ReplaceAll(input, "\x00", ""))
 }

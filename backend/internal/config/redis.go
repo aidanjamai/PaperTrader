@@ -3,7 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -34,19 +34,22 @@ func ConnectRedis(cfg *Config) (*redis.Client, error) {
 		opts.Password = cfg.RedisPassword
 	}
 
-	// Retry loop similar to MongoDB connection
+	// Retry loop similar to MongoDB connection. Each attempt gets its own
+	// context with timeout that's cancelled before the next iteration —
+	// previously cancel() was deferred, so all 5 cancels piled up to the
+	// function exit instead of releasing per-attempt.
 	for i := 0; i < 5; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 
-		log.Printf("Attempting to connect to Redis at %s (attempt %d/5)", opts.Addr, i+1)
+		slog.Info("attempting to connect to Redis", "addr", opts.Addr, "attempt", i+1, "max_attempts", 5)
 
 		client = redis.NewClient(opts)
 
 		// Test the connection
 		err = client.Ping(ctx).Err()
+		cancel()
 		if err != nil {
-			log.Printf("Failed to ping Redis (attempt %d/5): %v", i+1, err)
+			slog.Warn("failed to ping Redis", "attempt", i+1, "max_attempts", 5, "err", err)
 			client.Close()
 			if i < 4 {
 				time.Sleep(5 * time.Second)
@@ -54,10 +57,9 @@ func ConnectRedis(cfg *Config) (*redis.Client, error) {
 			continue
 		}
 
-		log.Println("Connected to Redis successfully")
+		slog.Info("connected to Redis successfully", "addr", opts.Addr)
 		return client, nil
 	}
 
 	return nil, fmt.Errorf("failed to connect to Redis after 5 attempts: %w", err)
 }
-

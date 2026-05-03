@@ -6,27 +6,27 @@ interface EmailVerificationBannerProps {
   onVerified?: () => void;
 }
 
-const EmailVerificationBanner: React.FC<EmailVerificationBannerProps> = ({ email, onVerified }) => {
+const EmailVerificationBanner: React.FC<EmailVerificationBannerProps> = ({ email }) => {
   const [resending, setResending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string>('');
 
   const handleResendVerification = async () => {
     setResending(true);
     setResendMessage('');
-    
+
     try {
       const response = await apiRequest('/account/resend-verification', {
         method: 'POST',
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email }),
       });
 
       const data = await response.json();
       if (response.ok && data.success) {
-        setResendMessage('Verification email sent! Please check your inbox.');
+        setResendMessage('Verification email sent — check your inbox.');
       } else {
-        setResendMessage(data.message || 'Failed to resend verification email');
+        setResendMessage(data.message || 'Failed to resend verification email.');
       }
-    } catch (error) {
+    } catch {
       setResendMessage('Failed to resend verification email. Please try again.');
     } finally {
       setResending(false);
@@ -35,70 +35,48 @@ const EmailVerificationBanner: React.FC<EmailVerificationBannerProps> = ({ email
   };
 
   return (
-    <div style={{
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      padding: '16px 20px',
-      marginBottom: '20px',
-      borderRadius: '8px',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      flexWrap: 'wrap',
-      gap: '12px'
-    }}>
-      <div style={{ flex: 1, minWidth: '250px' }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '12px',
-          marginBottom: resendMessage ? '8px' : '0'
-        }}>
-          <span style={{ fontSize: '20px' }}>⚠️</span>
-          <div>
-            <strong style={{ fontSize: '16px', display: 'block', marginBottom: '4px' }}>
-              Please verify your email address
-            </strong>
-            <p style={{ margin: 0, fontSize: '14px', opacity: 0.95 }}>
-              We sent a verification link to <strong>{email}</strong>. Click the link in your email to verify your account and start trading.
-            </p>
-          </div>
+    <div
+      className="verify-banner"
+      role="status"
+      style={{
+        background: 'var(--accent-tint)',
+        border: '1px solid var(--hairline)',
+        color: 'var(--ink)',
+        padding: '14px 18px',
+        marginBottom: 20,
+        marginTop: 16,
+        borderRadius: 8,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div className="eyebrow" style={{ marginBottom: 6, color: 'var(--accent)' }}>
+          Action required
+        </div>
+        <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+          Verify <span className="mono" style={{ color: 'var(--ink)' }}>{email}</span> to start
+          trading. We sent you a link — click it to activate your account.
         </div>
         {resendMessage && (
-          <div style={{
-            marginTop: '8px',
-            padding: '8px 12px',
-            background: 'rgba(255, 255, 255, 0.2)',
-            borderRadius: '4px',
-            fontSize: '14px'
-          }}>
+          <div className="mono" style={{ marginTop: 8, fontSize: 12, color: 'var(--ink-muted)' }}>
             {resendMessage}
           </div>
         )}
       </div>
       <button
+        type="button"
+        className="btn btn-secondary btn-sm"
         onClick={handleResendVerification}
         disabled={resending}
-        style={{
-          background: 'white',
-          color: '#667eea',
-          border: 'none',
-          padding: '10px 20px',
-          borderRadius: '6px',
-          cursor: resending ? 'not-allowed' : 'pointer',
-          fontWeight: '600',
-          fontSize: '14px',
-          opacity: resending ? 0.7 : 1,
-          transition: 'opacity 0.2s',
-          whiteSpace: 'nowrap'
-        }}
       >
-        {resending ? 'Sending...' : 'Resend Email'}
+        {resending ? 'Sending…' : 'Resend email'}
       </button>
     </div>
   );
 };
 
 export default EmailVerificationBanner;
-

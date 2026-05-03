@@ -1,8 +1,19 @@
 /**
  * Type-safe API client
- * 
+ *
  * Provides type-safe HTTP requests to the backend API
  */
+
+// Runtime-injected env. The Docker entrypoint writes a small <script> tag with
+// `window.env = { REACT_APP_API_URL: "..." }` before the bundle loads, so the
+// same image can be deployed against different backends without a rebuild.
+declare global {
+  interface Window {
+    env?: {
+      REACT_APP_API_URL?: string;
+    };
+  }
+}
 
 /**
  * API request options extending standard fetch options
@@ -26,17 +37,17 @@ export const apiRequest = async <T = unknown>(
 ): Promise<Response> => {
   // Use relative path by default to leverage the dev server proxy
   const API_BASE =
-    (window as any).env?.REACT_APP_API_URL ||
+    window.env?.REACT_APP_API_URL ||
     process.env.REACT_APP_API_URL ||
     '/api';
 
-  const token = localStorage.getItem('token');
-
+  // Auth is handled exclusively via the httpOnly 'token' cookie set by the backend.
+  // The cookie is sent automatically by the browser for same-origin requests;
+  // no Authorization header is needed or written here.
   const config: RequestInit = {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
   };

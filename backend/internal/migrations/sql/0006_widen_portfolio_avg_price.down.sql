@@ -1,0 +1,1 @@
+ALTER TABLE portfolio ALTER COLUMN avg_price TYPE NUMERIC(15,2);

@@ -2,24 +2,22 @@ package investments
 
 import (
 	"papertrader/internal/api/auth"
+	"papertrader/internal/config"
 	"papertrader/internal/service"
 
 	"github.com/gorilla/mux"
 )
 
-func Routes(h *InvestmentsHandler, jwtService *service.JWTService) *mux.Router {
-	r := mux.NewRouter()
-	// Disable strict slash to prevent redirects
+// Mount attaches the investments routes to r. r should be a subrouter scoped to
+// a path prefix (e.g. /api/investments); routes are registered relative to it,
+// so "" matches the bare prefix and "/buy" matches prefix + "/buy".
+func Mount(r *mux.Router, h *InvestmentsHandler, jwtService *service.JWTService, cfg *config.Config) {
 	r.StrictSlash(false)
-
-	// Apply JWT middleware to all investment routes
-	r.Use(auth.JWTMiddleware(jwtService))
+	r.Use(auth.JWTMiddleware(jwtService, cfg))
 
 	r.HandleFunc("/buy", h.BuyStock).Methods("POST")
 	r.HandleFunc("/sell", h.SellStock).Methods("POST")
-	// After http.StripPrefix("/api/investments", ...), /api/investments becomes "/" or ""
-	// Register both to handle with and without trailing slash
-	r.HandleFunc("/", h.GetUserStocks).Methods("GET")
+	r.HandleFunc("/history", h.GetTradeHistory).Methods("GET")
 	r.HandleFunc("", h.GetUserStocks).Methods("GET")
-	return r
+	r.HandleFunc("/", h.GetUserStocks).Methods("GET")
 }

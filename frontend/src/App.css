@@ -1,40 +1,21 @@
-.App {
+/* App-shell-only layout. All visual tokens + primitives live in index.css. */
+
+.app-shell {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-.container {
-  padding-top: 20px;
-  padding-bottom: 40px;
+.app-main {
+  flex: 1;
+  padding: 24px 0 48px;
 }
 
-/* Responsive design */
-@media (max-width: 768px) {
-  .container {
-    padding: 20px 15px;
-  }
-  
-  .card {
-    margin: 0 15px;
-    padding: 24px;
-  }
-  
-  .navbar-content {
-    flex-direction: column;
-    gap: 16px;
-  }
-  
-  .auth-links {
-    justify-content: center;
-  }
+.app-loading {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  font-size: 14px;
 }
-
-.calculator-card {
-  max-width: 1000px !important;
-  width: 100%;
-}
-
-.calculator-card .card {
-  max-width: 1000px !important;
-  width: 100%;
-}
-

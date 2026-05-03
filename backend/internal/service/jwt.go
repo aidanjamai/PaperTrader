@@ -36,9 +36,16 @@ func (j *JWTService) GenerateToken(userID, email string) (string, error) {
 
 func (j *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return j.secretKey, nil
-	})
+	// Pin the signing method explicitly. Without WithValidMethods, a future
+	// refactor that adds (say) an RSA key handler would risk algorithm-
+	// confusion attacks. Locks the parser to HS256 — the only thing
+	// GenerateToken issues — so any other alg (including "none") is rejected.
+	token, err := jwt.ParseWithClaims(tokenString, claims,
+		func(token *jwt.Token) (interface{}, error) {
+			return j.secretKey, nil
+		},
+		jwt.WithValidMethods([]string{"HS256"}),
+	)
 
 	if err != nil || !token.Valid {
 		return nil, err
@@ -46,4 +53,3 @@ func (j *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 
 	return claims, nil
 }
-

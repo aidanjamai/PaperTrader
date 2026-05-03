@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS portfolio (
+	id VARCHAR(255) PRIMARY KEY,
+	user_id VARCHAR(255) NOT NULL,
+	symbol VARCHAR(10) NOT NULL,
+	quantity INTEGER NOT NULL DEFAULT 0,
+	avg_price NUMERIC(15,2) NOT NULL,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(user_id, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_user_id ON portfolio(user_id);
