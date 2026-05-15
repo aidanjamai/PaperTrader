@@ -11,6 +11,7 @@ import Home from './components/common/Home';
 import Trade from './components/trading/Trade';
 import History from './components/trading/History';
 import Markets from './components/trading/Markets';
+import Research from './components/research/Research';
 import Calculator from './components/tools/Calculator';
 import CompoundInterest from './components/tools/CompoundInterest';
 import Stock from './components/common/Stock';
@@ -105,6 +106,16 @@ const App: React.FC = () => {
                     element={
                       isAuthenticated && user ? (
                         <History />
+                      ) : (
+                        <Navigate to="/login" replace />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/research"
+                    element={
+                      isAuthenticated && user ? (
+                        <Research />
                       ) : (
                         <Navigate to="/login" replace />
                       )

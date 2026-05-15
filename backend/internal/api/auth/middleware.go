@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,36 @@ import (
 // tokenRefreshThreshold: re-issue the cookie when the current token is older than this.
 // Combined with a 24-hour JWT lifetime this gives a sliding 24-hour idle-timeout.
 const tokenRefreshThreshold = 12 * time.Hour
+
+// ctxKey is a private type so request-context keys can't collide with keys
+// from other packages.
+type ctxKey int
+
+const (
+	userIDKey ctxKey = iota
+	emailKey
+)
+
+// UserIDFromContext returns the authenticated user ID populated by JWTMiddleware,
+// and whether one was present. New code should prefer this over reading the
+// X-User-ID request header so that handlers fail closed if JWT is not wired.
+func UserIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(userIDKey).(string)
+	return v, ok && v != ""
+}
+
+// EmailFromContext returns the authenticated user email populated by JWTMiddleware.
+func EmailFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(emailKey).(string)
+	return v, ok && v != ""
+}
+
+// WithUserID returns a derived context carrying userID. Intended for tests that
+// need to exercise handlers that read identity from context without spinning up
+// the full JWT middleware chain.
+func WithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
 
 func JWTMiddleware(jwtService *service.JWTService, cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -59,7 +90,10 @@ func JWTMiddleware(jwtService *service.JWTService, cfg *config.Config) func(http
 			r.Header.Set("X-User-ID", claims.UserID)
 			r.Header.Set("X-User-Email", claims.Email)
 
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
+			ctx = context.WithValue(ctx, emailKey, claims.Email)
+
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

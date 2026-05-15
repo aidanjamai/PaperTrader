@@ -121,3 +121,49 @@ func TestMemoryRateLimiter_RemainingDecreases(t *testing.T) {
 		prev = r.Remaining
 	}
 }
+
+func TestMemoryRateLimiter_BucketBlocksAtCustomLimit(t *testing.T) {
+	rl := NewMemoryRateLimiter()
+	ctx := context.Background()
+
+	// User limit (10) is tighter than IP limit (30) — user limit should bind first.
+	for i := 0; i < 10; i++ {
+		r, _ := rl.CheckLimitWithBucket(ctx, "research_ask", "user-1", "10.0.0.1", 10, 30, time.Minute)
+		if !r.Allowed {
+			t.Fatalf("research_ask request %d should be allowed under user limit 10", i+1)
+		}
+	}
+
+	r, _ := rl.CheckLimitWithBucket(ctx, "research_ask", "user-1", "10.0.0.1", 10, 30, time.Minute)
+	if r.Allowed {
+		t.Error("11th request should be blocked by user limit")
+	}
+	if !r.LimitExceeded {
+		t.Error("LimitExceeded should be true")
+	}
+}
+
+func TestMemoryRateLimiter_BucketsAreIsolated(t *testing.T) {
+	rl := NewMemoryRateLimiter()
+	ctx := context.Background()
+
+	// Burn through a tight per-route bucket.
+	for i := 0; i < 5; i++ {
+		rl.CheckLimitWithBucket(ctx, "research_ask", "user-1", "10.0.0.1", 5, 5, time.Minute)
+	}
+	r, _ := rl.CheckLimitWithBucket(ctx, "research_ask", "user-1", "10.0.0.1", 5, 5, time.Minute)
+	if r.Allowed {
+		t.Fatal("research_ask bucket should be exhausted")
+	}
+
+	// Global bucket (default CheckLimit) must NOT be affected — keys are
+	// namespaced by bucket prefix, so the same user/IP can still hit other
+	// endpoints normally.
+	gr, err := rl.CheckLimit(ctx, "user-1", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("CheckLimit: %v", err)
+	}
+	if !gr.Allowed {
+		t.Error("global bucket should be unaffected by exhausted research_ask bucket")
+	}
+}

@@ -9,9 +9,70 @@ import (
 	"strings"
 	"time"
 
+	"papertrader/internal/api/auth"
 	"papertrader/internal/config"
 	"papertrader/internal/service"
 )
+
+// RateLimitMiddlewareCustom enforces a per-route limit (separate bucket from
+// the global one). Use for endpoints that are more expensive than the default —
+// e.g. /api/research/ask, which costs an LLM round-trip per call.
+//
+// If limiter is nil (Redis unavailable and no in-memory fallback wired) the
+// middleware passes through. Callers that absolutely require rate limiting
+// must assert non-nil at Mount time.
+func RateLimitMiddlewareCustom(limiter service.RateLimiter, cfg *config.Config, bucket string, userLimit, ipLimit int, window time.Duration) func(http.Handler) http.Handler {
+	if limiter == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userID, _ := auth.UserIDFromContext(r.Context())
+			ipAddress := getIPAddress(r)
+
+			result, err := limiter.CheckLimitWithBucket(r.Context(), bucket, userID, ipAddress, userLimit, ipLimit, window)
+			if err != nil {
+				if cfg != nil && cfg.IsProduction() {
+					slog.Warn("rate limiter error in production; denying request",
+						"bucket", bucket,
+						"user_id", userID,
+						"remote_addr", ipAddress,
+						"err", err,
+						"component", "rate_limit",
+					)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"success":    false,
+						"message":    "Rate limiting service unavailable",
+						"error_code": "RATE_LIMITER_UNAVAILABLE",
+					})
+					return
+				}
+				slog.Warn("rate limiter error in development; allowing request",
+					"bucket", bucket,
+					"user_id", userID,
+					"remote_addr", ipAddress,
+					"err", err,
+					"component", "rate_limit",
+				)
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetTime.Unix(), 10))
+
+			if !result.Allowed {
+				w.Header().Set("Retry-After", strconv.FormatInt(int64(time.Until(result.ResetTime).Seconds()), 10))
+				http.Error(w, "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // RateLimitMiddleware creates middleware for rate limiting using the provided rate limiter
 func RateLimitMiddleware(limiter service.RateLimiter, cfg *config.Config) func(http.Handler) http.Handler {

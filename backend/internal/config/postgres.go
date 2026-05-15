@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,16 @@ func ConnectPostgreSQL(cfg *Config) (*sql.DB, error) {
 		}
 
 		slog.Info("connected to PostgreSQL successfully")
+
+		// Best-effort: enable pgvector. If the image doesn't have the extension the
+		// migration will fail loudly later — this is just a convenience so dev
+		// containers don't require a separate CREATE EXTENSION step.
+		if _, extErr := db.ExecContext(context.Background(), "CREATE EXTENSION IF NOT EXISTS vector;"); extErr != nil {
+			slog.Warn("could not create pgvector extension; ensure image is pgvector/pgvector:pg15", "err", extErr)
+		} else {
+			slog.Info("pgvector extension ready")
+		}
+
 		return db, nil
 	}
 

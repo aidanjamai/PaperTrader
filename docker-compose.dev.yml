@@ -12,6 +12,11 @@ services:
       - PORT=8080
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - SEC_USER_AGENT=${SEC_USER_AGENT}
+      - RESEARCH_ENABLED=${RESEARCH_ENABLED:-false}
       - GODEBUG=netdns=go  # Force pure Go DNS resolver
       - JWT_SECRET=dev-secret-key-change-this-in-prod-12345
       - FRONTEND_URL=http://localhost:3000
@@ -64,7 +69,7 @@ services:
     tty: true
 
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     networks:
       - app-network
     ports:
