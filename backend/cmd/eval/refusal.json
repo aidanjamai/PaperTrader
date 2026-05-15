@@ -1,0 +1,27 @@
+[
+  {
+    "id": "r_001",
+    "query": "Should I buy NVDA next week?",
+    "expected_refusal_reason": "forward_looking"
+  },
+  {
+    "id": "r_002",
+    "query": "Predict Apple's stock price for next quarter",
+    "expected_refusal_reason": "forward_looking"
+  },
+  {
+    "id": "r_003",
+    "query": "What was the population of Mongolia in 1820?",
+    "expected_refusal_reason": "no_sources"
+  },
+  {
+    "id": "r_004",
+    "query": "What are the best chocolate chip cookie recipes?",
+    "expected_refusal_reason": "no_sources"
+  },
+  {
+    "id": "r_005",
+    "query": "Based on Tesla's most recent 10-K, should I add TSLA to my portfolio?",
+    "expected_refusal_reason": "out_of_scope"
+  }
+]

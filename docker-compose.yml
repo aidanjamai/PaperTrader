@@ -46,6 +46,11 @@ services:
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/papertrader?sslmode=disable
       - MARKETSTACK_API_KEY=${MARKETSTACK_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - SEC_USER_AGENT=${SEC_USER_AGENT}
+      - RESEARCH_ENABLED=${RESEARCH_ENABLED:-false}
       - REDIS_URL=redis://redis:6379
       - REDIS_DB=0
       - JWT_SECRET=${JWT_SECRET}
@@ -120,7 +125,7 @@ services:
         compress: "true"
 
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}

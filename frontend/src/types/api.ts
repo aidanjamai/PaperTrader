@@ -181,3 +181,26 @@ export interface WatchlistResponse {
   items: WatchlistEntry[];
 }
 
+export interface ResearchCitation {
+  chunk_id: string;
+  source_url: string;
+  symbol?: string;
+  filed_at?: string;
+  excerpt: string;
+  score: number;
+}
+
+export interface ResearchAnswer {
+  query_id: string;
+  answer: string;
+  citations: ResearchCitation[];
+  refused: boolean;
+  refusal_reason?: string;
+  latency_ms: number;
+}
+
+export interface ResearchAskRequest {
+  query: string;
+  symbols?: string[];
+}
+

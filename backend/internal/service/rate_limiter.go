@@ -20,6 +20,11 @@ type RateLimitResult struct {
 // RateLimiter interface defines methods for rate limiting
 type RateLimiter interface {
 	CheckLimit(ctx context.Context, userID, ipAddress string) (*RateLimitResult, error)
+	// CheckLimitWithBucket runs the same sliding-window check against a custom
+	// bucket namespace and limit/window pair. Lets a single endpoint enforce
+	// tighter limits than the global default without colliding with the
+	// global ratelimit:user / ratelimit:ip keys.
+	CheckLimitWithBucket(ctx context.Context, bucket, userID, ipAddress string, userLimit, ipLimit int, window time.Duration) (*RateLimitResult, error)
 }
 
 // RedisRateLimiter implements RateLimiter using Redis sliding window
@@ -78,26 +83,33 @@ redis.call('EXPIRE', key, ttl)
 return {1, count + 1}
 `)
 
-// CheckLimit checks both user and IP rate limits using sliding window algorithm
+// CheckLimit checks both user and IP rate limits against the global default
+// bucket using the limiter's configured limits and window.
 func (r *RedisRateLimiter) CheckLimit(ctx context.Context, userID, ipAddress string) (*RateLimitResult, error) {
+	return r.CheckLimitWithBucket(ctx, "ratelimit", userID, ipAddress, r.userLimit, r.ipLimit, r.windowDuration)
+}
+
+// CheckLimitWithBucket runs the sliding-window check against a custom bucket
+// namespace and per-call limits/window. Used by endpoints that need tighter
+// limits than the global default (e.g. /api/research/ask).
+func (r *RedisRateLimiter) CheckLimitWithBucket(ctx context.Context, bucket, userID, ipAddress string, userLimit, ipLimit int, window time.Duration) (*RateLimitResult, error) {
 	now := time.Now()
-	windowStart := now.Add(-r.windowDuration)
+	windowStart := now.Add(-window)
 
 	result := &RateLimitResult{
-		ResetTime: now.Add(r.windowDuration),
+		ResetTime: now.Add(window),
 	}
 
-	// Check user limit if userID is provided
 	if userID != "" {
-		userAllowed, userRemaining, err := r.checkWindowLimit(ctx, "ratelimit:user:"+userID, r.userLimit, windowStart, now)
+		userAllowed, userRemaining, err := r.checkWindowLimitWithTTL(ctx, bucket+":user:"+userID, userLimit, windowStart, now, window)
 		if err != nil {
 			slog.Warn("Redis error checking user rate limit",
+				"bucket", bucket,
 				"user_id", userID,
 				"err", err,
 				"component", "rate_limiter",
 			)
-			// Fail open - allow request if Redis is unavailable
-			return &RateLimitResult{Allowed: true, Remaining: r.userLimit}, nil
+			return &RateLimitResult{Allowed: true, Remaining: userLimit}, nil
 		}
 		if !userAllowed {
 			result.Allowed = false
@@ -108,20 +120,17 @@ func (r *RedisRateLimiter) CheckLimit(ctx context.Context, userID, ipAddress str
 		result.Remaining = userRemaining
 	}
 
-	// Check IP limit
-	ipAllowed, ipRemaining, err := r.checkWindowLimit(ctx, "ratelimit:ip:"+ipAddress, r.ipLimit, windowStart, now)
+	ipAllowed, ipRemaining, err := r.checkWindowLimitWithTTL(ctx, bucket+":ip:"+ipAddress, ipLimit, windowStart, now, window)
 	if err != nil {
 		slog.Warn("Redis error checking IP rate limit",
+			"bucket", bucket,
 			"remote_addr", ipAddress,
 			"err", err,
 			"component", "rate_limiter",
 		)
-		// Fail open: allow but report a generic remaining count.
-		// Use the smaller of the two configured limits as the upper bound — it's
-		// a placeholder header value, not a binding decision.
-		fallback := r.ipLimit
-		if r.userLimit < fallback {
-			fallback = r.userLimit
+		fallback := ipLimit
+		if userLimit < fallback {
+			fallback = userLimit
 		}
 		result.Remaining = fallback
 		result.Allowed = true
@@ -134,9 +143,7 @@ func (r *RedisRateLimiter) CheckLimit(ctx context.Context, userID, ipAddress str
 		return result, nil
 	}
 
-	// Both limits passed
 	result.Allowed = true
-	// Return the more restrictive remaining count
 	if userID != "" && result.Remaining > ipRemaining {
 		result.Remaining = ipRemaining
 	} else if userID == "" {
@@ -146,10 +153,11 @@ func (r *RedisRateLimiter) CheckLimit(ctx context.Context, userID, ipAddress str
 	return result, nil
 }
 
-// checkWindowLimit implements sliding window rate limiting using sorted sets.
-// The check-and-add must be atomic; see slidingWindowScript above.
-func (r *RedisRateLimiter) checkWindowLimit(ctx context.Context, key string, limit int, windowStart, now time.Time) (allowed bool, remaining int, err error) {
-	ttl := int((r.windowDuration + time.Minute) / time.Second)
+// checkWindowLimitWithTTL implements sliding window rate limiting using sorted
+// sets, with the TTL derived from the caller-supplied window. The check-and-add
+// must be atomic; see slidingWindowScript above.
+func (r *RedisRateLimiter) checkWindowLimitWithTTL(ctx context.Context, key string, limit int, windowStart, now time.Time, window time.Duration) (allowed bool, remaining int, err error) {
+	ttl := int((window + time.Minute) / time.Second)
 
 	res, err := slidingWindowScript.Run(ctx, r.client,
 		[]string{key},

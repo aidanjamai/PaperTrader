@@ -4,6 +4,8 @@
  * Provides type-safe HTTP requests to the backend API
  */
 
+import { ResearchAnswer } from '../types/api';
+
 // Runtime-injected env. The Docker entrypoint writes a small <script> tag with
 // `window.env = { REACT_APP_API_URL: "..." }` before the bundle loads, so the
 // same image can be deployed against different backends without a rebuild.
@@ -24,7 +26,7 @@ export interface ApiRequestOptions extends RequestInit {
 
 /**
  * Type-safe API request function
- * 
+ *
  * @template T - The expected response type (for documentation/type hints)
  * @param endpoint - API endpoint path
  * @param options - Fetch options (method, body, headers, etc.)
@@ -63,7 +65,7 @@ export const apiRequest = async <T = unknown>(
 
 /**
  * Type-safe API request that parses JSON response
- * 
+ *
  * @template T - The expected response type
  * @param endpoint - API endpoint path
  * @param options - Fetch options
@@ -89,3 +91,32 @@ export const apiRequestJson = async <T = unknown>(
   }
 };
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function askResearch(query: string, symbols?: string[]): Promise<ResearchAnswer> {
+  const body: { query: string; symbols?: string[] } = { query };
+  if (symbols && symbols.length > 0) {
+    body.symbols = symbols;
+  }
+
+  const response = await apiRequest<ResearchAnswer>('/research/ask', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(`${response.status}`, response.status);
+  }
+
+  try {
+    return (await response.json()) as ResearchAnswer;
+  } catch {
+    throw new ApiError('Failed to parse response', response.status);
+  }
+}

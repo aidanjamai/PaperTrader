@@ -1,0 +1,58 @@
+[
+  {
+    "id": "g_001",
+    "query": "What did Apple disclose as supply chain risks in their most recent 10-K?",
+    "symbols": ["AAPL"],
+    "expected_substrings_any": ["supplier", "concentration", "manufacturing", "single", "geographic"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_002",
+    "query": "What does NVIDIA say about export controls and their effect on revenue?",
+    "symbols": ["NVDA"],
+    "expected_substrings_any": ["export", "license", "BIS", "China", "controls"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_003",
+    "query": "How does Microsoft describe risks related to AI infrastructure capital expenditure?",
+    "symbols": ["MSFT"],
+    "expected_substrings_any": ["capital", "datacenter", "infrastructure", "investment"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_004",
+    "query": "What disclosure does Coinbase make about regulatory enforcement risk?",
+    "symbols": ["COIN"],
+    "expected_substrings_any": ["enforcement", "SEC", "regulatory", "compliance"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_005",
+    "query": "What competitive risks does Meta cite from short-form video platforms?",
+    "symbols": ["META"],
+    "expected_substrings_any": ["competition", "TikTok", "short-form", "engagement"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_006",
+    "query": "What does Tesla say about manufacturing capacity expansion?",
+    "symbols": ["TSLA"],
+    "expected_substrings_any": ["capacity", "Gigafactory", "production", "expansion"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_007",
+    "query": "What does Visa disclose about cross-border payment volume trends?",
+    "symbols": ["V"],
+    "expected_substrings_any": ["cross-border", "volume", "payment", "international"],
+    "min_citations": 1
+  },
+  {
+    "id": "g_008",
+    "query": "What concentration risk does JPMorgan disclose in its loan portfolio?",
+    "symbols": ["JPM"],
+    "expected_substrings_any": ["concentration", "loan", "portfolio", "credit"],
+    "min_citations": 1
+  }
+]

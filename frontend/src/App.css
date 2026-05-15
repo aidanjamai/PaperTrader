@@ -1,5 +1,69 @@
 /* App-shell-only layout. All visual tokens + primitives live in index.css. */
 
+/* Research */
+.cite-marker {
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+.cite-marker a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.cite-marker a:hover {
+  text-decoration: underline;
+}
+
+.research-source {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.research-source:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.research-source-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.research-source-num {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.research-source-url {
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.research-source-url:hover {
+  text-decoration: underline;
+}
+
+.research-quote {
+  margin: 8px 0 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--hairline);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--canvas);
+  border-radius: 0 4px 4px 0;
+}
+
+
 .app-shell {
   min-height: 100vh;
   display: flex;

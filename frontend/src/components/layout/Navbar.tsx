@@ -120,6 +120,12 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated, user, onLogout }) => {
         >
           Tools
         </NavLink>
+        <NavLink
+          to="/research"
+          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+        >
+          Research
+        </NavLink>
       </div>
       <div className="right">
         <ThemeToggle />

@@ -14,11 +14,15 @@ import (
 	"papertrader/internal/api/investments"
 	"papertrader/internal/api/market"
 	"papertrader/internal/api/middleware"
+	apiresearch "papertrader/internal/api/research"
 	"papertrader/internal/api/watchlist"
 	"papertrader/internal/config"
 	"papertrader/internal/data"
 	"papertrader/internal/migrations"
 	"papertrader/internal/service"
+	"papertrader/internal/service/research"
+	"papertrader/internal/service/research/ingest"
+	researchsched "papertrader/internal/service/research/scheduler"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -51,6 +55,7 @@ func main() {
 	router := app.router
 	db := app.db
 	redisClient := app.redisClient
+	scheduler := app.scheduler
 	// Connections are closed in the graceful-shutdown block below; no defer
 	// here, since defer + explicit close logs spurious "already closed" errors
 	// (redis Close is not idempotent).
@@ -96,6 +101,12 @@ func main() {
 	investments.Mount(apiRouter.PathPrefix("/investments").Subrouter(), app.investmentsHandler, app.jwtService, cfg)
 	watchlist.Mount(apiRouter.PathPrefix("/watchlist").Subrouter(), app.watchlistHandler, app.jwtService, app.rateLimiter, cfg)
 
+	if app.researchHandler != nil {
+		apiresearch.Mount(apiRouter.PathPrefix("/research").Subrouter(), app.researchHandler, app.jwtService, app.rateLimiter, cfg)
+	} else {
+		slog.Info("research handler: disabled (RESEARCH_ENABLED=false)")
+	}
+
 	port := cfg.Port
 
 	slog.Info("server starting", "port", port, "environment", cfg.Environment)
@@ -131,6 +142,12 @@ func main() {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("server forced to shutdown", "err", err)
+	}
+
+	if scheduler != nil {
+		if err := scheduler.Stop(ctx); err != nil {
+			slog.Error("error stopping ingest scheduler", "err", err)
+		}
 	}
 
 	if err := db.Close(); err != nil {
@@ -179,10 +196,12 @@ type appDeps struct {
 	marketHandler      *market.StockHandler
 	investmentsHandler *investments.InvestmentsHandler
 	watchlistHandler   *watchlist.WatchlistHandler
+	researchHandler    *apiresearch.Handler // nil when ResearchEnabled=false
 	db                 *sql.DB
 	redisClient        *redis.Client
 	jwtService         *service.JWTService
 	rateLimiter        service.RateLimiter
+	scheduler          *researchsched.IngestScheduler
 }
 
 func initialize(cfg *config.Config) *appDeps {
@@ -231,6 +250,60 @@ func initialize(cfg *config.Config) *appDeps {
 	portfolioStore := data.NewPortfolioStore(db)
 	watchlistStore := data.NewWatchlistStore(db)
 	stockHistoryStore := data.NewStockHistoryStore(db)
+
+	// Research stores — used by the ingest scheduler and the answer handler.
+	docsStore := data.NewDocumentsStore(db)
+	chunksStore := data.NewChunksStore(db)
+	embeddingsStore := data.NewEmbeddingsStore(db)
+	researchQueriesStore := data.NewResearchQueriesStore(db)
+
+	var ingestScheduler *researchsched.IngestScheduler
+	if cfg.IsProduction() && cfg.ResearchEnabled {
+		var embedder research.Embedder
+		voyage := research.NewVoyageEmbedder(cfg.VoyageAPIKey)
+		if redisClient != nil {
+			embedder = research.NewCachedEmbedder(voyage, redisClient)
+		} else {
+			embedder = voyage
+		}
+
+		edgarClient := ingest.NewEdgarClient(cfg.SecUserAgent)
+		pipeline := ingest.NewPipeline(edgarClient, embedder, docsStore, chunksStore, embeddingsStore)
+
+		universe := researchsched.SplitTickerUniverse(cfg.ResearchTickerUniverse)
+		sched, err := researchsched.NewIngestScheduler(pipeline, universe, cfg.ResearchIngestMaxFilings, cfg.ResearchIngestSchedule)
+		if err != nil {
+			slog.Error("failed to construct ingest scheduler", "err", err)
+			os.Exit(1)
+		}
+		if err := sched.Start(); err != nil {
+			slog.Error("failed to start ingest scheduler", "err", err)
+			os.Exit(1)
+		}
+		ingestScheduler = sched
+	} else {
+		slog.Info("ingest scheduler: disabled (production+RESEARCH_ENABLED required)")
+	}
+
+	// Research answer handler — constructed whenever RESEARCH_ENABLED=true,
+	// regardless of environment (allows local testing with real keys).
+	var researchHandler *apiresearch.Handler
+	if cfg.ResearchEnabled {
+		var embedder research.Embedder
+		voyage := research.NewVoyageEmbedder(cfg.VoyageAPIKey)
+		if redisClient != nil {
+			embedder = research.NewCachedEmbedder(voyage, redisClient)
+		} else {
+			embedder = voyage
+		}
+		retrievalSvc := research.NewRetrievalService(embedder, embeddingsStore)
+		groqClient := research.NewGroqClient(cfg.GroqAPIKey)
+		answerSvc := research.NewAnswerService(retrievalSvc, groqClient, researchQueriesStore, redisClient)
+		researchHandler = apiresearch.NewHandler(answerSvc)
+		slog.Info("research answer handler initialized", "model", groqClient.Model())
+	} else {
+		slog.Info("research handler: disabled (RESEARCH_ENABLED=false)")
+	}
 
 	// Initialize JWT service with secret from config
 	jwtService := service.NewJWTService(cfg.JWTSecret)
@@ -285,9 +358,11 @@ func initialize(cfg *config.Config) *appDeps {
 		marketHandler:      marketHandler,
 		investmentsHandler: investmentsHandler,
 		watchlistHandler:   watchlistHandler,
+		researchHandler:    researchHandler,
 		db:                 db,
 		redisClient:        redisClient,
 		jwtService:         jwtService,
 		rateLimiter:        rateLimiter,
+		scheduler:          ingestScheduler,
 	}
 }

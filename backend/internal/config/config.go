@@ -14,22 +14,30 @@ const (
 )
 
 type Config struct {
-	Port           string
-	MarketStackKey string
-	DatabaseURL    string
-	JWTSecret      string
-	FrontendURL    string
-	RedisURL       string
-	RedisPassword  string
-	RedisDB        int
-	Environment    string
-	ResendAPIKey   string
-	FromEmail      string
-	LogLevel       string
-	GoogleClientID string
-	MigrateOnStart bool
-	RequestTimeout time.Duration
-	MaxRequestSize int64
+	Port             string
+	MarketStackKey   string
+	DatabaseURL      string
+	JWTSecret        string
+	FrontendURL      string
+	RedisURL         string
+	RedisPassword    string
+	RedisDB          int
+	Environment      string
+	ResendAPIKey     string
+	FromEmail        string
+	LogLevel         string
+	GoogleClientID   string
+	MigrateOnStart   bool
+	RequestTimeout   time.Duration
+	MaxRequestSize   int64
+	GeminiAPIKey           string // env: GEMINI_API_KEY — reserved for Phase 4 LLM generation
+	GroqAPIKey             string // env: GROQ_API_KEY — llama-3.3-70b-versatile via Groq
+	VoyageAPIKey           string // env: VOYAGE_API_KEY
+	SecUserAgent           string // env: SEC_USER_AGENT
+	ResearchEnabled          bool   // env: RESEARCH_ENABLED
+	ResearchTickerUniverse   string // env: RESEARCH_TICKER_UNIVERSE — comma-separated default ingest set
+	ResearchIngestSchedule   string // env: RESEARCH_INGEST_SCHEDULE — cron expression, default "0 2 1 * *" (2 AM UTC, 1st of month)
+	ResearchIngestMaxFilings int    // env: RESEARCH_INGEST_MAX_FILINGS — per ticker, default 3
 }
 
 // IsProduction returns true if the environment is set to "production"
@@ -57,9 +65,17 @@ func Load() (*Config, error) {
 		FromEmail:      getEnv("FROM_EMAIL", ""),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
-		MigrateOnStart: getEnvBool("MIGRATE_ON_START", false),
-		RequestTimeout: getEnvDuration("REQUEST_TIMEOUT_SECONDS", defaultRequestTimeout),
-		MaxRequestSize: getEnvInt64("MAX_REQUEST_SIZE", defaultMaxRequestSize),
+		MigrateOnStart:  getEnvBool("MIGRATE_ON_START", false),
+		RequestTimeout:  getEnvDuration("REQUEST_TIMEOUT_SECONDS", defaultRequestTimeout),
+		MaxRequestSize:  getEnvInt64("MAX_REQUEST_SIZE", defaultMaxRequestSize),
+		GeminiAPIKey:           getEnv("GEMINI_API_KEY", ""),
+		GroqAPIKey:             getEnv("GROQ_API_KEY", ""),
+		VoyageAPIKey:           getEnv("VOYAGE_API_KEY", ""),
+		SecUserAgent:           getEnv("SEC_USER_AGENT", "PaperTrader research@example.com"),
+		ResearchEnabled:          getEnvBool("RESEARCH_ENABLED", false),
+		ResearchTickerUniverse:   getEnv("RESEARCH_TICKER_UNIVERSE", "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,COIN,JPM,V"),
+		ResearchIngestSchedule:   getEnv("RESEARCH_INGEST_SCHEDULE", "0 2 1 * *"),
+		ResearchIngestMaxFilings: getEnvInt("RESEARCH_INGEST_MAX_FILINGS", 3),
 	}
 
 	if strings.ToLower(env) == "production" {
@@ -110,6 +126,18 @@ func validateProductionConfig(cfg *Config) error {
 
 	if cfg.FrontendURL == "" || cfg.FrontendURL == "http://localhost:3000" {
 		return fmt.Errorf("FRONTEND_URL must be set to production domain in production")
+	}
+
+	if cfg.ResearchEnabled {
+		if cfg.VoyageAPIKey == "" {
+			return fmt.Errorf("VOYAGE_API_KEY is required in production when RESEARCH_ENABLED=true")
+		}
+		if cfg.GroqAPIKey == "" {
+			return fmt.Errorf("GROQ_API_KEY is required in production when RESEARCH_ENABLED=true")
+		}
+		if !strings.Contains(cfg.SecUserAgent, "@") {
+			return fmt.Errorf("SEC_USER_AGENT must contain a valid contact email (with '@') in production")
+		}
 	}
 
 	return nil

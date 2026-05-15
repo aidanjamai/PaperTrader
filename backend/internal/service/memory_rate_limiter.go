@@ -25,18 +25,23 @@ func NewMemoryRateLimiter() *MemoryRateLimiter {
 	}
 }
 
-// CheckLimit implements RateLimiter. It checks both user and IP sliding windows
-// and increments the counter for the current request.
-func (m *MemoryRateLimiter) CheckLimit(_ context.Context, userID, ipAddress string) (*RateLimitResult, error) {
+// CheckLimit implements RateLimiter against the global default bucket.
+func (m *MemoryRateLimiter) CheckLimit(ctx context.Context, userID, ipAddress string) (*RateLimitResult, error) {
+	return m.CheckLimitWithBucket(ctx, "ratelimit", userID, ipAddress, m.userLimit, m.ipLimit, m.window)
+}
+
+// CheckLimitWithBucket runs the same sliding-window check against a custom
+// bucket namespace and per-call limits/window.
+func (m *MemoryRateLimiter) CheckLimitWithBucket(_ context.Context, bucket, userID, ipAddress string, userLimit, ipLimit int, window time.Duration) (*RateLimitResult, error) {
 	now := time.Now()
-	cutoff := now.Add(-m.window)
-	result := &RateLimitResult{ResetTime: now.Add(m.window)}
+	cutoff := now.Add(-window)
+	result := &RateLimitResult{ResetTime: now.Add(window)}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if userID != "" {
-		allowed, remaining := m.checkAndAdd("user:"+userID, m.userLimit, cutoff, now)
+		allowed, remaining := m.checkAndAdd(bucket+":user:"+userID, userLimit, cutoff, now)
 		if !allowed {
 			result.Allowed = false
 			result.LimitExceeded = true
@@ -45,7 +50,7 @@ func (m *MemoryRateLimiter) CheckLimit(_ context.Context, userID, ipAddress stri
 		result.Remaining = remaining
 	}
 
-	allowed, remaining := m.checkAndAdd("ip:"+ipAddress, m.ipLimit, cutoff, now)
+	allowed, remaining := m.checkAndAdd(bucket+":ip:"+ipAddress, ipLimit, cutoff, now)
 	if !allowed {
 		result.Allowed = false
 		result.LimitExceeded = true
