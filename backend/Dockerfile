@@ -15,6 +15,11 @@ COPY . .
 # Build a fully static binary — pure-Go drivers only, no cgo.
 RUN CGO_ENABLED=0 GOOS=linux go build -o main .
 
+# Also build the ingest CLI so prod can seed / trigger the research corpus on
+# demand. The in-process scheduler only fires on RESEARCH_INGEST_SCHEDULE
+# (default monthly), so without this there is no manual path to populate it.
+RUN CGO_ENABLED=0 GOOS=linux go build -o ingest ./cmd/ingest
+
 # Start a new stage from scratch
 FROM alpine:latest
 
@@ -24,12 +29,13 @@ RUN apk --no-cache add ca-certificates wget && \
 
 WORKDIR /app
 
-# Copy the Pre-built binary file from the previous stage
+# Copy the Pre-built binary files from the previous stage
 COPY --from=builder /app/main .
+COPY --from=builder /app/ingest .
 
 # Set ownership and permissions
-RUN chown appuser:appuser /app/main && \
-    chmod +x /app/main
+RUN chown appuser:appuser /app/main /app/ingest && \
+    chmod +x /app/main /app/ingest
 
 # Switch to non-root user for security
 USER appuser
