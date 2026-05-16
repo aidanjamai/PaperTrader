@@ -99,10 +99,19 @@ export class ApiError extends Error {
   }
 }
 
-export async function askResearch(query: string, symbols?: string[]): Promise<ResearchAnswer> {
-  const body: { query: string; symbols?: string[] } = { query };
+export async function askResearch(
+  query: string,
+  symbols?: string[],
+  allowGeneral?: boolean
+): Promise<ResearchAnswer> {
+  const body: { query: string; symbols?: string[]; allow_general?: boolean } = {
+    query,
+  };
   if (symbols && symbols.length > 0) {
     body.symbols = symbols;
+  }
+  if (allowGeneral) {
+    body.allow_general = true;
   }
 
   const response = await apiRequest<ResearchAnswer>('/research/ask', {

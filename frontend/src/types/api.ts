@@ -202,6 +202,7 @@ export interface ResearchAnswer {
   refused: boolean;
   refusal_reason?: string;
   coverage?: ResearchCoverage;
+  mode?: 'grounded' | 'general';
   latency_ms: number;
 }
 

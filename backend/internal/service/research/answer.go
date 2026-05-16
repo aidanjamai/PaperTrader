@@ -87,6 +87,10 @@ type AnswerService struct {
 	queries     queriesStore
 	answerCache *redis.Client // optional, nil-safe
 	coverage    *coverageCache // optional, nil-safe
+	// fallbackGeneral mirrors RESEARCH_FALLBACK_GENERAL. When false, an
+	// AllowGeneral request is treated exactly like a normal request (no
+	// uncited path), so the feature is fully off by default.
+	fallbackGeneral bool
 }
 
 func NewAnswerService(
@@ -95,12 +99,14 @@ func NewAnswerService(
 	queries queriesStore,
 	cache *redis.Client,
 	docSymbols docSymbolSource,
+	fallbackGeneral bool,
 ) *AnswerService {
 	s := &AnswerService{
-		retrieval:   ret,
-		llm:         llm,
-		queries:     queries,
-		answerCache: cache,
+		retrieval:       ret,
+		llm:             llm,
+		queries:         queries,
+		answerCache:     cache,
+		fallbackGeneral: fallbackGeneral,
 	}
 	if docSymbols != nil {
 		s.coverage = &coverageCache{src: docSymbols}
@@ -134,7 +140,11 @@ type Answer struct {
 	Refused       bool       `json:"refused"`
 	RefusalReason string     `json:"refusal_reason,omitempty"`
 	Coverage      *Coverage  `json:"coverage,omitempty"`
-	LatencyMS     int        `json:"latency_ms"`
+	// Mode is "general" for an explicitly opted-in, uncited general-knowledge
+	// answer; empty/absent means a normal grounded answer. The client uses
+	// this to render an unmistakable "not from filings" banner.
+	Mode      string `json:"mode,omitempty"`
+	LatencyMS int    `json:"latency_ms"`
 }
 
 // AskOpts parameterises a single Ask call.
@@ -142,6 +152,11 @@ type AskOpts struct {
 	Symbols  []string
 	K        int
 	MinScore float64
+	// AllowGeneral is set only when the user explicitly opts into an uncited
+	// general-knowledge answer after a no_sources refusal. Gated server-side
+	// by RESEARCH_FALLBACK_GENERAL; never enables advice (the forward-looking
+	// gate still runs first).
+	AllowGeneral bool
 }
 
 func (s *AnswerService) Ask(ctx context.Context, userID, query string, opts AskOpts) (*Answer, error) {
@@ -160,9 +175,11 @@ func (s *AnswerService) Ask(ctx context.Context, userID, query string, opts AskO
 
 	queryID := makeQueryID(query, userID, start)
 
-	// 1. Answer cache lookup.
+	// 1. Answer cache lookup. Skipped for AllowGeneral requests: the cache key
+	// does not encode the general/grounded distinction, so serving a cached
+	// grounded answer to a general request (or vice-versa) would be wrong.
 	cacheKey := answerCacheKey(query, opts.Symbols)
-	if s.answerCache != nil {
+	if s.answerCache != nil && !opts.AllowGeneral {
 		if cached, err := s.answerCache.Get(ctx, cacheKey).Bytes(); err == nil {
 			var a Answer
 			if jsonErr := json.Unmarshal(cached, &a); jsonErr == nil {
@@ -172,9 +189,20 @@ func (s *AnswerService) Ask(ctx context.Context, userID, query string, opts AskO
 		}
 	}
 
-	// 2. Forward-looking refusal (no retrieval, no LLM).
+	// 2. Forward-looking refusal (no retrieval, no LLM). MUST stay ahead of the
+	// general-knowledge path below so an opted-in uncited answer can never
+	// become buy/sell/prediction advice.
 	if isForwardLooking(query) {
 		return s.refuse(ctx, queryID, userID, query, "forward_looking", start, nil)
+	}
+
+	// 2b. Explicit, user-opted uncited general-knowledge answer. Gated by
+	// RESEARCH_FALLBACK_GENERAL server-side. Skips retrieval entirely (the
+	// user already saw a no_sources refusal and chose to proceed without
+	// sources); cheaper and avoids the no_sources/INSUFFICIENT_SOURCES
+	// ambiguity. Not cached.
+	if opts.AllowGeneral && s.fallbackGeneral {
+		return s.generalAnswer(ctx, queryID, userID, query, start)
 	}
 
 	// 3. Retrieve.
@@ -430,6 +458,80 @@ func coverageExamples(symbols []string) []string {
 		fmt.Sprintf("What risk factors did %s disclose in its latest 10-K?", s),
 		fmt.Sprintf("Summarize %s's revenue segments from its most recent filing.", s),
 	}
+}
+
+// generalAnswer produces an explicitly uncited answer from the model's general
+// knowledge. Only reached when the user opted in (AllowGeneral) and the server
+// flag is on, and only after the forward-looking gate has already run. It still
+// honours OUT_OF_SCOPE so it cannot become investment advice. Not cached; the
+// row is persisted like a normal answer (no distinguishing column, by design).
+func (s *AnswerService) generalAnswer(ctx context.Context, queryID, userID, query string, start time.Time) (*Answer, error) {
+	system := `You are a financial research assistant answering from general knowledge. You have NO source documents for this question.
+- Answer concisely and factually from general knowledge.
+- You have no sources, so do NOT include any citation markers like [1].
+- Do not give buy/sell/hold recommendations or price predictions. If the user asks for one, reply EXACTLY: OUT_OF_SCOPE
+- If you are unsure, say so plainly rather than guessing.
+
+Output format (JSON only, no other text):
+{"answer": "<your answer>"}`
+	user := "QUESTION: " + query
+
+	genStart := time.Now()
+	result, err := s.llm.Generate(ctx, system, user, LLMOpts{
+		Temperature: 0.2,
+		MaxTokens:   800,
+		JSONMode:    true,
+	})
+	if err != nil {
+		slog.Error("research general LLM call failed", "query_id", queryID, "err", err)
+		return nil, err
+	}
+	generationMS := int(time.Since(genStart).Milliseconds())
+	content := strings.TrimSpace(result.Content)
+
+	if content == "OUT_OF_SCOPE" {
+		return s.refuseWithTokens(ctx, queryID, userID, query, "out_of_scope", start,
+			nil, intPtr(generationMS), result.PromptTokens, result.CompletionTokens)
+	}
+
+	var llmOut struct {
+		Answer string `json:"answer"`
+	}
+	if jsonErr := json.Unmarshal([]byte(content), &llmOut); jsonErr != nil || strings.TrimSpace(llmOut.Answer) == "" {
+		slog.Warn("research general LLM returned invalid/empty JSON",
+			"query_id", queryID, "content_prefix", truncate(content, 120))
+		return s.refuseWithTokens(ctx, queryID, userID, query, "model_error", start,
+			nil, intPtr(generationMS), result.PromptTokens, result.CompletionTokens)
+	}
+
+	totalMS := int(time.Since(start).Milliseconds())
+	costMicros := CalcCostMicros(s.llm, result.PromptTokens, result.CompletionTokens)
+	model := s.llm.Model()
+	answerText := llmOut.Answer
+
+	_ = s.queries.Insert(ctx, data.ResearchQuery{
+		ID:               queryID,
+		UserID:           nilIfEmpty(userID),
+		QueryText:        query,
+		AnswerText:       &answerText,
+		Refused:          false,
+		Citations:        []byte("[]"),
+		GenerationMS:     intPtr(generationMS),
+		TotalMS:          intPtr(totalMS),
+		PromptTokens:     intPtr(result.PromptTokens),
+		CompletionTokens: intPtr(result.CompletionTokens),
+		CostUSDMicros:    intPtr(costMicros),
+		Model:            &model,
+	})
+
+	return &Answer{
+		QueryID:   queryID,
+		Answer:    llmOut.Answer,
+		Citations: []Citation{},
+		Refused:   false,
+		Mode:      "general",
+		LatencyMS: totalMS,
+	}, nil
 }
 
 func isForwardLooking(query string) bool {

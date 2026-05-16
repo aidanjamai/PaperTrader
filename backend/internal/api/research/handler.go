@@ -36,6 +36,10 @@ type askRequest struct {
 	Symbols  []string `json:"symbols"`
 	K        int      `json:"k"`
 	MinScore float64  `json:"min_score"`
+	// AllowGeneral is the explicit user opt-in to an uncited general-knowledge
+	// answer, sent only after a no_sources refusal. Server-gated by
+	// RESEARCH_FALLBACK_GENERAL — a true here is inert unless that is enabled.
+	AllowGeneral bool `json:"allow_general"`
 }
 
 // Ask handles POST /api/research/ask.
@@ -71,9 +75,10 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	answer, err := h.svc.Ask(r.Context(), userID, req.Query, svcresearch.AskOpts{
-		Symbols:  req.Symbols,
-		K:        req.K,
-		MinScore: req.MinScore,
+		Symbols:      req.Symbols,
+		K:            req.K,
+		MinScore:     req.MinScore,
+		AllowGeneral: req.AllowGeneral,
 	})
 	if err != nil {
 		util.WriteSafeError(w, http.StatusInternalServerError, "research query failed", err, "INTERNAL_ERROR")

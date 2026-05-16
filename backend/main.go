@@ -298,7 +298,7 @@ func initialize(cfg *config.Config) *appDeps {
 		}
 		retrievalSvc := research.NewRetrievalService(embedder, embeddingsStore)
 		groqClient := research.NewGroqClient(cfg.GroqAPIKey)
-		answerSvc := research.NewAnswerService(retrievalSvc, groqClient, researchQueriesStore, redisClient, docsStore)
+		answerSvc := research.NewAnswerService(retrievalSvc, groqClient, researchQueriesStore, redisClient, docsStore, cfg.ResearchFallbackGeneral)
 		researchHandler = apiresearch.NewHandler(answerSvc)
 		slog.Info("research answer handler initialized", "model", groqClient.Model())
 	} else {

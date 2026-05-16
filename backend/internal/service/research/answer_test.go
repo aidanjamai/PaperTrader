@@ -67,7 +67,7 @@ func makeHits(n int, score float64) []data.ChunkHit {
 }
 
 func newAnswerSvc(ret retriever, llm LLMClient, qs queriesStore) *AnswerService {
-	return NewAnswerService(ret, llm, qs, nil, nil)
+	return NewAnswerService(ret, llm, qs, nil, nil, false)
 }
 
 // ---- tests ----

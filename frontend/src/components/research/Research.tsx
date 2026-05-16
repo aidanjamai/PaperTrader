@@ -117,7 +117,8 @@ const CitationItem: React.FC<{ citation: ResearchCitation; index: number }> = ({
 const RefusalCard: React.FC<{
   answer: ResearchAnswer;
   onPick: (q: string) => void;
-}> = ({ answer, onPick }) => {
+  onGeneral: () => void;
+}> = ({ answer, onPick, onGeneral }) => {
   const copy = getRefusalCopy(answer.refusal_reason);
   const coverage =
     answer.refusal_reason === 'no_sources' ? answer.coverage : undefined;
@@ -200,6 +201,23 @@ const RefusalCard: React.FC<{
           </>
         )}
 
+        {answer.refusal_reason === 'no_sources' && (
+          <div style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={onGeneral}
+            >
+              Answer without sources
+            </button>
+            <p className="muted" style={{ margin: '6px 0 0 0', fontSize: 11 }}>
+              Uses the model&rsquo;s general knowledge — no citations, may be
+              outdated, and not financial advice.
+            </p>
+          </div>
+        )}
+
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
           Took {answer.latency_ms}ms
         </p>
@@ -244,6 +262,65 @@ const AnswerCard: React.FC<{ answer: ResearchAnswer }> = ({ answer }) => {
   );
 };
 
+// ---- General-knowledge (uncited) answer card ----
+// Deliberately, unmistakably distinct from AnswerCard: amber framing, a
+// persistent warning header, and no Sources section. The user explicitly
+// opted into this after a no_sources refusal.
+const GeneralAnswerCard: React.FC<{ answer: ResearchAnswer }> = ({ answer }) => {
+  return (
+    <div
+      className="panel"
+      style={{
+        marginTop: 24,
+        border: '2px solid #b45309',
+        background: 'rgba(180, 83, 9, 0.06)',
+      }}
+    >
+      <div
+        style={{
+          padding: '12px 24px',
+          background: 'rgba(180, 83, 9, 0.14)',
+          borderBottom: '1px solid #b45309',
+          color: '#b45309',
+          fontSize: 13,
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <span aria-hidden="true">⚠</span>
+        General knowledge &middot; not from SEC filings &middot; may be outdated
+        &middot; not financial advice
+      </div>
+      <div style={{ padding: '20px 24px' }}>
+        <div
+          style={{
+            whiteSpace: 'pre-wrap',
+            lineHeight: 1.7,
+            color: 'var(--ink)',
+            marginBottom: 12,
+          }}
+        >
+          {answer.answer}
+        </div>
+        <p
+          className="muted"
+          style={{
+            margin: 0,
+            fontSize: 12,
+            borderTop: '1px solid var(--hairline)',
+            paddingTop: 12,
+          }}
+        >
+          No sources &middot; general knowledge &middot; Latency:{' '}
+          {answer.latency_ms}ms
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // ---- Main page ----
 const Research: React.FC = () => {
   const [query, setQuery] = useState<string>('');
@@ -252,7 +329,7 @@ const Research: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const runQuery = async (rawQuery: string) => {
+  const runQuery = async (rawQuery: string, allowGeneral = false) => {
     const trimmedQuery = rawQuery.trim();
 
     if (!trimmedQuery) return;
@@ -273,7 +350,8 @@ const Research: React.FC = () => {
     try {
       const result = await askResearch(
         trimmedQuery,
-        parsedSymbols.length > 0 ? parsedSymbols : undefined
+        parsedSymbols.length > 0 ? parsedSymbols : undefined,
+        allowGeneral
       );
 
       // Defensive: empty answer text with refused=false → treat as model_error refusal
@@ -309,6 +387,13 @@ const Research: React.FC = () => {
   const handlePick = (q: string) => {
     setQuery(q);
     runQuery(q);
+  };
+
+  // "Answer without sources" opt-in on a no_sources refusal. Re-runs the
+  // current query with allowGeneral. Inert unless RESEARCH_FALLBACK_GENERAL
+  // is enabled server-side (it just refuses again in that case).
+  const handleGeneral = () => {
+    runQuery(query, true);
   };
 
   const isSubmitDisabled = loading || !query.trim();
@@ -390,10 +475,18 @@ const Research: React.FC = () => {
       )}
 
       {!loading && !error && answer && answer.refused && (
-        <RefusalCard answer={answer} onPick={handlePick} />
+        <RefusalCard
+          answer={answer}
+          onPick={handlePick}
+          onGeneral={handleGeneral}
+        />
       )}
 
-      {!loading && !error && answer && !answer.refused && (
+      {!loading && !error && answer && !answer.refused && answer.mode === 'general' && (
+        <GeneralAnswerCard answer={answer} />
+      )}
+
+      {!loading && !error && answer && !answer.refused && answer.mode !== 'general' && (
         <AnswerCard answer={answer} />
       )}
 

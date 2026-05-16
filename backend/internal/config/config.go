@@ -38,6 +38,7 @@ type Config struct {
 	ResearchTickerUniverse   string // env: RESEARCH_TICKER_UNIVERSE — comma-separated default ingest set
 	ResearchIngestSchedule   string // env: RESEARCH_INGEST_SCHEDULE — cron expression, default "0 2 1 * *" (2 AM UTC, 1st of month)
 	ResearchIngestMaxFilings int    // env: RESEARCH_INGEST_MAX_FILINGS — per ticker, default 3
+	ResearchFallbackGeneral  bool   // env: RESEARCH_FALLBACK_GENERAL — allow opt-in uncited general-knowledge answers when no sources match (default false)
 }
 
 // IsProduction returns true if the environment is set to "production"
@@ -76,6 +77,7 @@ func Load() (*Config, error) {
 		ResearchTickerUniverse:   getEnv("RESEARCH_TICKER_UNIVERSE", "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,COIN,JPM,V"),
 		ResearchIngestSchedule:   getEnv("RESEARCH_INGEST_SCHEDULE", "0 2 1 * *"),
 		ResearchIngestMaxFilings: getEnvInt("RESEARCH_INGEST_MAX_FILINGS", 3),
+		ResearchFallbackGeneral:  getEnvBool("RESEARCH_FALLBACK_GENERAL", false),
 	}
 
 	if strings.ToLower(env) == "production" {
