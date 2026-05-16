@@ -190,12 +190,18 @@ export interface ResearchCitation {
   score: number;
 }
 
+export interface ResearchCoverage {
+  symbols: string[];
+  examples?: string[];
+}
+
 export interface ResearchAnswer {
   query_id: string;
   answer: string;
   citations: ResearchCitation[];
   refused: boolean;
   refusal_reason?: string;
+  coverage?: ResearchCoverage;
   latency_ms: number;
 }
 

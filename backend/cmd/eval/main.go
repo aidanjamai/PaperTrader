@@ -130,7 +130,7 @@ func main() {
 	// Pass nil for the answer cache — the eval harness handles caching at the
 	// LLM layer; a separate answer cache would suppress the token/cost recording
 	// we need for metrics.
-	answerSvc := research.NewAnswerService(retrieval, genClient, queriesStore, nil)
+	answerSvc := research.NewAnswerService(retrieval, genClient, queriesStore, nil, nil)
 
 	goldenItems, err := loadGolden(*goldenPath)
 	if err != nil {

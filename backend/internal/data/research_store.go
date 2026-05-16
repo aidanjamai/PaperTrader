@@ -120,6 +120,31 @@ FROM documents WHERE source_url = $1`
 	return s.scanDocument(ctx, query, url)
 }
 
+// DistinctSymbols returns the sorted set of distinct, non-empty symbols that
+// have at least one ingested document. Used by the research refusal path to
+// tell the user which tickers the corpus can actually answer for.
+func (s *DocumentsStore) DistinctSymbols(ctx context.Context) ([]string, error) {
+	const query = `
+SELECT DISTINCT symbol FROM documents
+WHERE symbol IS NOT NULL AND symbol <> ''
+ORDER BY symbol`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var symbols []string
+	for rows.Next() {
+		var sym string
+		if err := rows.Scan(&sym); err != nil {
+			return nil, err
+		}
+		symbols = append(symbols, sym)
+	}
+	return symbols, rows.Err()
+}
+
 func (s *DocumentsStore) scanDocument(ctx context.Context, query string, arg interface{}) (*Document, error) {
 	var d Document
 	var symbol, title sql.NullString

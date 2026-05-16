@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"papertrader/internal/data"
@@ -45,12 +46,47 @@ type queriesStore interface {
 	Insert(ctx context.Context, q data.ResearchQuery) error
 }
 
+// docSymbolSource is the subset of data.DocumentsStore used to surface corpus
+// coverage in no_sources refusals. An interface keeps AnswerService testable.
+type docSymbolSource interface {
+	DistinctSymbols(ctx context.Context) ([]string, error)
+}
+
+const coverageTTL = time.Minute
+
+// coverageCache memoises the distinct-symbol list for a short window so the
+// refusal path doesn't hit the DB on every miss. A best-effort hint: on error
+// it serves whatever it last had (possibly nil) rather than failing the request.
+type coverageCache struct {
+	src docSymbolSource
+
+	mu      sync.Mutex
+	symbols []string
+	fetched time.Time
+}
+
+func (c *coverageCache) get(ctx context.Context) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.symbols != nil && time.Since(c.fetched) < coverageTTL {
+		return c.symbols
+	}
+	syms, err := c.src.DistinctSymbols(ctx)
+	if err != nil {
+		return c.symbols
+	}
+	c.symbols = syms
+	c.fetched = time.Now()
+	return syms
+}
+
 // AnswerService orchestrates retrieval, LLM generation, and citation validation.
 type AnswerService struct {
 	retrieval   retriever
 	llm         LLMClient
 	queries     queriesStore
 	answerCache *redis.Client // optional, nil-safe
+	coverage    *coverageCache // optional, nil-safe
 }
 
 func NewAnswerService(
@@ -58,13 +94,18 @@ func NewAnswerService(
 	llm LLMClient,
 	queries queriesStore,
 	cache *redis.Client,
+	docSymbols docSymbolSource,
 ) *AnswerService {
-	return &AnswerService{
+	s := &AnswerService{
 		retrieval:   ret,
 		llm:         llm,
 		queries:     queries,
 		answerCache: cache,
 	}
+	if docSymbols != nil {
+		s.coverage = &coverageCache{src: docSymbols}
+	}
+	return s
 }
 
 // Citation is one source that the LLM cited in its answer.
@@ -77,6 +118,14 @@ type Citation struct {
 	Score     float64 `json:"score"`
 }
 
+// Coverage tells the client which tickers the corpus can actually answer for.
+// Populated only on no_sources refusals so the UI can offer actionable
+// suggestions instead of a dead end.
+type Coverage struct {
+	Symbols  []string `json:"symbols"`
+	Examples []string `json:"examples,omitempty"`
+}
+
 // Answer is the top-level response type returned from Ask.
 type Answer struct {
 	QueryID       string     `json:"query_id"`
@@ -84,6 +133,7 @@ type Answer struct {
 	Citations     []Citation `json:"citations"`
 	Refused       bool       `json:"refused"`
 	RefusalReason string     `json:"refusal_reason,omitempty"`
+	Coverage      *Coverage  `json:"coverage,omitempty"`
 	LatencyMS     int        `json:"latency_ms"`
 }
 
@@ -348,13 +398,38 @@ func (s *AnswerService) refuseWithTokens(
 
 	_ = s.queries.Insert(ctx, row)
 
+	// A no_sources refusal is a dead end for the user. Attach the set of
+	// tickers the corpus can actually answer for so the UI can offer
+	// actionable suggestions instead. Best-effort and presentation-only —
+	// not persisted to research_queries.
+	var coverage *Coverage
+	if reason == "no_sources" && s.coverage != nil {
+		if syms := s.coverage.get(ctx); len(syms) > 0 {
+			coverage = &Coverage{Symbols: syms, Examples: coverageExamples(syms)}
+		}
+	}
+
 	return &Answer{
 		QueryID:       queryID,
 		Refused:       true,
 		RefusalReason: reason,
+		Coverage:      coverage,
 		Citations:     []Citation{},
 		LatencyMS:     totalMS,
 	}, nil
+}
+
+// coverageExamples builds a couple of concrete, answerable example questions
+// from the first covered symbol so the refusal card has something clickable.
+func coverageExamples(symbols []string) []string {
+	if len(symbols) == 0 {
+		return nil
+	}
+	s := symbols[0]
+	return []string{
+		fmt.Sprintf("What risk factors did %s disclose in its latest 10-K?", s),
+		fmt.Sprintf("Summarize %s's revenue segments from its most recent filing.", s),
+	}
 }
 
 func isForwardLooking(query string) bool {

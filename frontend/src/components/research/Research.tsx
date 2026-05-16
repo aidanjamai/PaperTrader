@@ -18,7 +18,7 @@ function getRefusalCopy(reason: string | undefined): RefusalCopy {
     case 'no_sources':
       return {
         title: 'Nothing in my sources matches',
-        body: "I couldn't find anything in my corpus that supports an answer to that question. The corpus is limited to recent SEC filings and market news for ~10 large US tickers. Try rephrasing or asking about a different topic.",
+        body: "I couldn't find anything in my SEC-filing corpus that supports an answer to that question.",
       };
     case 'out_of_scope':
       return {
@@ -114,15 +114,92 @@ const CitationItem: React.FC<{ citation: ResearchCitation; index: number }> = ({
 };
 
 // ---- Refusal card ----
-const RefusalCard: React.FC<{ answer: ResearchAnswer }> = ({ answer }) => {
+const RefusalCard: React.FC<{
+  answer: ResearchAnswer;
+  onPick: (q: string) => void;
+}> = ({ answer, onPick }) => {
   const copy = getRefusalCopy(answer.refusal_reason);
+  const coverage =
+    answer.refusal_reason === 'no_sources' ? answer.coverage : undefined;
+  const hasCoverage = !!coverage && coverage.symbols.length > 0;
+
   return (
     <div className="panel" style={{ marginTop: 24 }}>
       <div style={{ padding: '20px 24px' }}>
         <h4 style={{ margin: '0 0 8px 0', color: 'var(--ink)' }}>{copy.title}</h4>
-        <p style={{ margin: '0 0 16px 0', color: 'var(--ink-muted)', lineHeight: 1.6 }}>
+        <p
+          style={{
+            margin: hasCoverage ? '0 0 16px 0' : '0 0 16px 0',
+            color: 'var(--ink-muted)',
+            lineHeight: 1.6,
+          }}
+        >
           {copy.body}
         </p>
+
+        {hasCoverage && (
+          <>
+            <p className="muted" style={{ margin: '0 0 8px 0', fontSize: 12 }}>
+              I have filings for these tickers — click one:
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              {coverage!.symbols.map((sym) => (
+                <button
+                  key={sym}
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() =>
+                    onPick(
+                      `What risk factors did ${sym} disclose in its latest 10-K?`
+                    )
+                  }
+                >
+                  {sym}
+                </button>
+              ))}
+            </div>
+
+            {coverage!.examples && coverage!.examples.length > 0 && (
+              <>
+                <p
+                  className="muted"
+                  style={{ margin: '0 0 8px 0', fontSize: 12 }}
+                >
+                  Or try one of these:
+                </p>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    marginBottom: 16,
+                  }}
+                >
+                  {coverage!.examples.map((ex) => (
+                    <button
+                      key={ex}
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ textAlign: 'left', fontSize: 13 }}
+                      onClick={() => onPick(ex)}
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
           Took {answer.latency_ms}ms
         </p>
@@ -175,9 +252,8 @@ const Research: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const trimmedQuery = query.trim();
+  const runQuery = async (rawQuery: string) => {
+    const trimmedQuery = rawQuery.trim();
 
     if (!trimmedQuery) return;
     if (trimmedQuery.length > 2000) {
@@ -221,6 +297,18 @@ const Research: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    runQuery(query);
+  };
+
+  // Clicking a coverage chip / example in the refusal card: fill the box so
+  // the user sees what was asked, then run it.
+  const handlePick = (q: string) => {
+    setQuery(q);
+    runQuery(q);
   };
 
   const isSubmitDisabled = loading || !query.trim();
@@ -302,7 +390,7 @@ const Research: React.FC = () => {
       )}
 
       {!loading && !error && answer && answer.refused && (
-        <RefusalCard answer={answer} />
+        <RefusalCard answer={answer} onPick={handlePick} />
       )}
 
       {!loading && !error && answer && !answer.refused && (
